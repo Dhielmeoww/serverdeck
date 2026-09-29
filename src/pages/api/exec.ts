@@ -35,6 +35,7 @@ export const POST: APIRoute = async (context) => {
       cwd: typeof body.cwd === 'string' && body.cwd.startsWith('/') ? body.cwd : undefined,
       sudo,
       sudoPassword: sudo === 'password' ? String(body.sudoPassword ?? '') : undefined,
+      trackCwd: Boolean(body.trackCwd),
     });
 
     return new Response(
@@ -44,6 +45,7 @@ export const POST: APIRoute = async (context) => {
         stderr: result.stderr,
         exitCode: result.exitCode,
         timedOut: Boolean(result.timedOut),
+        cwd: 'cwd' in result ? result.cwd : undefined,
       }),
       {
         status: 200,

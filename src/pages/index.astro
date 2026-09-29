@@ -337,6 +337,7 @@ const permRows = [
             ))}
           </div>
           <div class="ml-auto flex items-center gap-1">
+            <button type="button" id="btn-term-open-folder" class="h-7 rounded-md px-2 text-[12px] text-slate-400 transition hover:bg-slate-800 hover:text-slate-100" title="Buka folder terminal di File Manager">Buka folder</button>
             <button type="button" id="btn-clear-terminal" class="h-7 rounded-md px-2 text-[12px] text-slate-400 transition hover:bg-slate-800 hover:text-slate-100">Clear</button>
             <button type="button" id="btn-close-terminal" class="inline-flex size-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-800 hover:text-slate-100" aria-label="Tutup terminal">
               <Icon name="chevronDown" size={16} />
@@ -349,7 +350,7 @@ const permRows = [
         </div>
 
         <div class="flex h-11 shrink-0 items-center gap-2 border-t border-slate-800 px-4">
-          <span id="term-prompt" class="shrink-0 font-mono text-[12px] font-semibold text-brand-300">{userHost ? `${userHost}:$` : '$'}</span>
+          <span id="term-prompt" class="max-w-[50%] shrink-0 truncate font-mono text-[12px] font-semibold text-brand-300">{userHost ? `${userHost}:$` : "$"}</span>
           <input type="text" id="term-input" placeholder="ls -la" autocomplete="off" spellcheck="false" class="w-full bg-transparent font-mono text-[12px] text-slate-100 placeholder:text-slate-600 focus:outline-none" />
         </div>
       </div>
@@ -564,11 +565,14 @@ const permRows = [
   }
 
   // ---------- Views ----------
+  let termUser = '';
+
   function setUserHost(username, host) {
     const label = `${username}@${host}`;
     $('header-user-host').textContent = label;
     $('sidebar-user-host').textContent = label;
-    $('term-prompt').textContent = `${label}:$`;
+    termUser = label;
+    updatePrompt();
   }
 
   // Platform server menentukan perintah yang relevan (Windows tidak punya df, free, dll).
@@ -577,6 +581,7 @@ const permRows = [
     const platform = system.platform || 'unix';
     appContainer.dataset.platform = platform;
     appContainer.dataset.shell = system.shell || 'sh';
+    if (system.homeDir) appContainer.dataset.initialHome = system.homeDir;
     if (system.uname) $('sidebar-os-info').textContent = system.uname;
     $('quick-commands').classList.toggle('md:flex', platform !== 'windows');
   }
@@ -804,9 +809,15 @@ const permRows = [
 
   // ---------- Directory ----------
   async function loadDirectory(path) {
+    const previousPath = currentPath;
     currentPath = path.replace(/\\/g, '/').replace(/\/+/g, '/');
     if (!currentPath.startsWith('/')) currentPath = '/' + currentPath;
     if (currentPath.length > 1) currentPath = currentPath.replace(/\/$/, '');
+    // Pindah folder di File Manager memindahkan terminal juga (muat ulang folder yang sama tidak).
+    if (currentPath !== previousPath || !termCwd) {
+      termCwd = currentPath;
+      updatePrompt();
+    }
 
     const spinner = $('table-loading-spinner');
     spinner.classList.remove('hidden');
@@ -1309,6 +1320,25 @@ const permRows = [
 
   // ---------- Terminal ----------
   let isTerminalOpen = false;
+  // Folder terminal: mengikuti File Manager, lalu berubah sendiri bila ada `cd`.
+  let termCwd = null;
+
+  function shortPath(path) {
+    const home = appContainer.dataset.initialHome || '';
+    if (home && home !== '/' && (path === home || path.startsWith(home + '/'))) return '~' + path.slice(home.length);
+    return path;
+  }
+
+  function promptText() {
+    return `${termUser ? `${termUser}:` : ''}${shortPath(termCwd || currentPath)}$`;
+  }
+
+  function updatePrompt() {
+    $('term-prompt').textContent = promptText();
+    $('term-prompt').title = termCwd || currentPath;
+  }
+
+  $('btn-term-open-folder').addEventListener('click', () => window.openInFiles(termCwd || currentPath));
 
   function setTerminal(open) {
     isTerminalOpen = open;
@@ -1357,7 +1387,11 @@ const permRows = [
 
   async function executeRemoteCommand(cmd) {
     const output = $('terminal-output');
-    termLine(`$ ${cmd}`, 'font-semibold text-brand-300');
+    if (cmd === 'clear' || cmd === 'cls') {
+      output.innerHTML = '';
+      return;
+    }
+    termLine(`${promptText()} ${cmd}`, 'font-semibold text-brand-300');
     const running = termLine('Menjalankan…', 'animate-pulse text-slate-500');
     output.scrollTop = output.scrollHeight;
 
@@ -1365,14 +1399,19 @@ const permRows = [
       const res = await fetch('/api/exec', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Folder kerja diterjemahkan server sesuai shell (sh / cmd / PowerShell).
+        // Tiap perintah adalah sesi shell baru; trackCwd membuat server melaporkan
+        // folder terakhir sehingga `cd` berlaku untuk perintah berikutnya.
         // sudo -n: gagal cepat bila sudo minta password, bukan menggantung.
-        body: JSON.stringify({ command: cmd, cwd: currentPath, sudo: 'nonInteractive' }),
+        body: JSON.stringify({ command: cmd, cwd: termCwd || currentPath, sudo: 'nonInteractive', trackCwd: true }),
       });
       const data = await res.json();
       running.remove();
 
       if (!res.ok) throw new Error(data.error || `Request gagal (${res.status})`);
+      if (data.cwd && data.cwd !== termCwd) {
+        termCwd = data.cwd;
+        updatePrompt();
+      }
       if (data.stdout) termLine(data.stdout, 'whitespace-pre-wrap text-slate-200', 'pre');
       if (data.stderr) termLine(data.stderr, 'whitespace-pre-wrap text-red-400', 'pre');
       if (/sudo: (a )?password is required|sudo: a terminal is required/i.test(data.stderr || '')) {

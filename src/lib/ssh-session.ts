@@ -33,6 +33,40 @@ export interface ExecOptions {
    */
   sudo?: 'none' | 'nonInteractive' | 'password';
   sudoPassword?: string;
+  /**
+   * Laporkan folder terakhir setelah perintah selesai (untuk terminal: `cd`
+   * di satu perintah berlaku untuk perintah berikutnya). Tidak didukung di cmd.exe.
+   */
+  trackCwd?: boolean;
+}
+
+const CWD_MARKER = '__SERVERDECK_CWD__';
+
+/** Bungkus perintah agar mencetak folder akhirnya, tanpa mengubah exit code. */
+function withCwdReport(shell: Shell, command: string): string {
+  if (shell === 'powershell') {
+    return [
+      command,
+      '$__sdec = if ($?) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }',
+      `Write-Output ("\`n${CWD_MARKER}" + (Get-Location).ProviderPath)`,
+      'exit $__sdec',
+    ].join('\n');
+  }
+  // Baris baru sebelum "}" supaya perintah yang diakhiri komentar tetap valid.
+  return `{ ${command}\n}\n__sd_ec=$?\nprintf '\\n${CWD_MARKER}%s\\n' "$(pwd)"\nexit $__sd_ec`;
+}
+
+/** Pisahkan penanda folder dari stdout. */
+function extractCwd(stdout: string, shell: Shell): { stdout: string; cwd?: string } {
+  const at = stdout.lastIndexOf(CWD_MARKER);
+  if (at === -1) return { stdout };
+  let raw = stdout.slice(at + CWD_MARKER.length).split(/\r?\n/)[0].trim();
+  // Buang satu baris baru yang ditambahkan pembungkus sebelum penanda.
+  const before = stdout.slice(0, at).replace(/\r?\n$/, '');
+  if (!raw) return { stdout: before };
+  // PowerShell: C:\Users\x → format path SFTP /C:/Users/x
+  if (shell === 'powershell') raw = '/' + raw.replace(/\\/g, '/').replace(/\/$/, '');
+  return { stdout: before, cwd: raw };
 }
 
 /** "/C:/Users/x" → "C:\Users\x" */
@@ -300,12 +334,17 @@ export class SSHManager {
   }
 
   /** Menjalankan perintah pengguna: folder kerja, sudo, dan timeout sekaligus. */
-  static run(sessionId: string, command: string, options: ExecOptions = {}) {
+  static async run(sessionId: string, command: string, options: ExecOptions = {}) {
     const session = this.getSession(sessionId);
     if (!session) throw new Error('No active SSH session');
-    const wrapped = this.buildCommand(session, command, options);
+    const track = Boolean(options.trackCwd) && session.shell !== 'cmd';
+    const body = track ? withCwdReport(session.shell, command) : command;
+    const wrapped = this.buildCommand(session, body, options);
     const stdin = session.platform === 'unix' && options.sudo === 'password' ? `${options.sudoPassword ?? ''}\n` : undefined;
-    return this.execCommand(sessionId, wrapped, options.timeoutMs ?? 0, stdin);
+    const res = await this.execCommand(sessionId, wrapped, options.timeoutMs ?? 0, stdin);
+    if (!track) return res;
+    const { stdout, cwd } = extractCwd(res.stdout, session.shell);
+    return { ...res, stdout, cwd };
   }
 
   /**
