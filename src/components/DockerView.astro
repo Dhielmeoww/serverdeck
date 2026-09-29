@@ -1,0 +1,208 @@
+---
+import Icon from './Icon.astro';
+// Statis: Astro tidak meng-emit CSS yang di-import dinamis dari script klien.
+import '@xterm/xterm/css/xterm.css';
+---
+
+<section data-view-panel="docker" class="hidden">
+  <!-- ============ DAFTAR ============ -->
+  <div id="dk-list-screen">
+    <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div class="min-w-0">
+        <h1 class="text-[20px] font-bold tracking-tight text-slate-900">Docker</h1>
+        <p id="dk-subtitle" class="mt-0.5 text-[13px] text-slate-500">Container, image, dan volume di server yang sedang terhubung.</p>
+      </div>
+      <button type="button" id="dk-refresh" class="btn-secondary">
+        <Icon name="refresh" size={16} class="dk-refresh-icon" />
+        Muat ulang
+      </button>
+    </div>
+
+    <div id="dk-unavailable" class="hidden"></div>
+
+    <div id="dk-content">
+      <div id="dk-kpis" class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
+
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div id="dk-tabs" class="segmented grid-cols-3 sm:w-[420px]">
+          <button type="button" data-tab="containers" class="is-active">Container <span data-count="containers" class="ml-1 text-slate-400"></span></button>
+          <button type="button" data-tab="images">Image <span data-count="images" class="ml-1 text-slate-400"></span></button>
+          <button type="button" data-tab="volumes">Volume <span data-count="volumes" class="ml-1 text-slate-400"></span></button>
+        </div>
+
+        <div class="relative ml-auto w-full sm:w-64">
+          <Icon name="search" size={15} class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input id="dk-search" type="text" placeholder="Cari…" class="field-input pl-9" />
+        </div>
+
+        <!-- Toolbar per tab -->
+        <div data-toolbar="containers" class="flex items-center gap-2">
+          <select id="dk-state-filter" class="field-input w-auto pr-8" aria-label="Filter status">
+            <option value="all">Semua status</option>
+            <option value="running">Berjalan</option>
+            <option value="stopped">Berhenti</option>
+          </select>
+        </div>
+        <div data-toolbar="images" class="hidden items-center gap-2">
+          <form id="dk-pull-form" class="flex items-center gap-2">
+            <input id="dk-pull-ref" placeholder="nginx:latest" aria-label="Image yang di-pull" class="field-input w-44 font-mono text-[12px]" />
+            <button type="submit" class="btn-primary"><Icon name="save" size={15} />Pull</button>
+          </form>
+          <button type="button" id="dk-image-prune" class="btn-secondary" title="Hapus image dangling (tanpa tag)">Bersihkan</button>
+        </div>
+        <div data-toolbar="volumes" class="hidden items-center gap-2">
+          <button type="button" id="dk-volume-prune" class="btn-secondary" title="Hapus volume yang tidak dipakai container mana pun">Bersihkan tak terpakai</button>
+        </div>
+      </div>
+
+      <div id="dk-table" class="card overflow-hidden"></div>
+    </div>
+  </div>
+
+  <!-- ============ DETAIL CONTAINER ============ -->
+  <div id="dk-detail-screen" class="hidden">
+    <div class="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div class="flex min-w-0 flex-1 items-start gap-3">
+        <button type="button" id="dk-back" class="icon-btn mt-0.5 size-9 border border-slate-200" title="Kembali" aria-label="Kembali">
+          <svg class="size-[17px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        </button>
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h1 id="dk-detail-name" class="truncate text-[20px] font-bold tracking-tight text-slate-900"></h1>
+            <span id="dk-detail-state"></span>
+          </div>
+          <p id="dk-detail-sub" class="mt-0.5 truncate font-mono text-[12px] text-slate-500"></p>
+        </div>
+      </div>
+      <div id="dk-detail-actions" class="flex flex-wrap items-center gap-2"></div>
+    </div>
+
+    <div id="dk-detail-tabs" class="segmented mb-4 grid-cols-5 sm:w-[560px]">
+      <button type="button" data-dtab="overview" class="is-active">Ringkasan</button>
+      <button type="button" data-dtab="logs">Logs</button>
+      <button type="button" data-dtab="stats">Stats</button>
+      <button type="button" data-dtab="console">Console</button>
+      <button type="button" data-dtab="inspect">Inspect</button>
+    </div>
+
+    <div data-dpanel="overview" id="dk-overview"></div>
+
+    <div data-dpanel="logs" class="hidden">
+      <div class="card overflow-hidden">
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3">
+          <select id="dk-log-tail" class="field-input h-8 w-auto pr-8 text-[12.5px]" aria-label="Jumlah baris">
+            <option value="100">100 baris</option>
+            <option value="500" selected>500 baris</option>
+            <option value="2000">2.000 baris</option>
+            <option value="10000">10.000 baris</option>
+            <option value="all">Semua</option>
+          </select>
+          <label class="flex items-center gap-1.5 text-[12.5px] text-slate-600"><input type="checkbox" id="dk-log-follow" class="size-4 accent-brand-600" checked />Live</label>
+          <label class="flex items-center gap-1.5 text-[12.5px] text-slate-600"><input type="checkbox" id="dk-log-ts" class="size-4 accent-brand-600" />Timestamp</label>
+          <label class="flex items-center gap-1.5 text-[12.5px] text-slate-600"><input type="checkbox" id="dk-log-wrap" class="size-4 accent-brand-600" checked />Wrap</label>
+          <div class="relative ml-auto w-full sm:w-56">
+            <Icon name="search" size={14} class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input id="dk-log-filter" placeholder="Filter baris…" class="field-input h-8 pl-8 text-[12.5px]" />
+          </div>
+          <button type="button" id="dk-log-download" class="icon-btn" title="Unduh log" aria-label="Unduh log"><Icon name="save" size={16} /></button>
+          <button type="button" id="dk-log-clear" class="icon-btn" title="Bersihkan layar" aria-label="Bersihkan layar"><Icon name="close" size={16} /></button>
+        </div>
+        <div class="relative">
+          <pre id="dk-log-output" class="terminal-scroll h-[62vh] overflow-auto bg-slate-950 p-4 font-mono text-[12px] leading-relaxed text-slate-200"></pre>
+          <span id="dk-log-status" class="pointer-events-none absolute right-4 top-3 rounded-md bg-slate-900/80 px-2 py-0.5 text-[11px] text-slate-400"></span>
+        </div>
+      </div>
+    </div>
+
+    <div data-dpanel="stats" class="hidden" id="dk-stats"></div>
+
+    <div data-dpanel="console" class="hidden">
+      <div class="card overflow-hidden">
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3">
+          <select id="dk-console-shell" class="field-input h-8 w-auto pr-8 text-[12.5px]" aria-label="Shell">
+            <option value="auto">Shell otomatis</option>
+            <option value="/bin/bash">bash</option>
+            <option value="/bin/sh">sh</option>
+            <option value="/bin/ash">ash</option>
+            <option value="/bin/zsh">zsh</option>
+          </select>
+          <input id="dk-console-user" placeholder="User (bawaan image)" aria-label="User" class="field-input h-8 w-44 font-mono text-[12px]" />
+          <button type="button" id="dk-console-connect" class="btn-primary h-8 px-3"></button>
+          <span id="dk-console-status" class="text-[12px] text-slate-500"></span>
+        </div>
+        <div class="bg-[#020617] p-2">
+          <div id="dk-console-term" class="h-[60vh]"></div>
+        </div>
+      </div>
+    </div>
+
+    <div data-dpanel="inspect" class="hidden">
+      <div class="card overflow-hidden">
+        <div class="flex items-center gap-2 border-b border-slate-100 p-3">
+          <p class="text-[13px] font-semibold text-slate-900">docker inspect</p>
+          <button type="button" id="dk-inspect-copy" class="btn-secondary ml-auto h-8 px-3"><Icon name="save" size={14} />Salin JSON</button>
+        </div>
+        <pre id="dk-inspect-output" class="terminal-scroll h-[64vh] overflow-auto bg-slate-950 p-4 font-mono text-[12px] leading-relaxed text-slate-300"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MENU AKSI ============ -->
+  <div id="dk-menu" class="fixed z-[60] hidden min-w-[190px] rounded-[10px] border border-slate-200 bg-white p-1 shadow-[0_10px_30px_-12px_rgba(15,23,42,0.25)]"></div>
+
+  <!-- ============ DIALOG RECREATE ============ -->
+  <div id="dk-recreate-dialog" class="dialog-backdrop">
+    <form id="dk-recreate-form" class="dialog max-w-md">
+      <p id="dk-recreate-title" class="dialog-title">Recreate container?</p>
+      <p id="dk-recreate-desc" class="dialog-subtitle"></p>
+      <label class="mt-4 flex items-start gap-2 text-[13px] text-slate-700">
+        <input type="checkbox" id="dk-recreate-pull" class="mt-0.5 size-4 accent-brand-600" checked />
+        <span>Pull image terbaru dulu<span class="block text-[12px] text-slate-400">Untuk update ke versi image terbaru dengan tag yang sama.</span></span>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" data-close class="btn-secondary">Batal</button>
+        <button type="submit" class="btn-primary">Recreate</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ============ DIALOG EDIT ============ -->
+  <div id="dk-edit-dialog" class="dialog-backdrop">
+    <div class="flex h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+      <div class="flex items-center gap-3 border-b border-slate-100 px-6 py-4">
+        <div class="min-w-0 flex-1">
+          <p id="dk-edit-title" class="dialog-title">Edit container</p>
+          <p id="dk-edit-subtitle" class="text-[12.5px] text-slate-500"></p>
+        </div>
+        <button type="button" data-close class="icon-btn" aria-label="Tutup"><Icon name="close" size={18} /></button>
+      </div>
+      <div id="dk-edit-body" class="min-h-0 flex-1 overflow-y-auto px-6 py-5"></div>
+      <div class="flex flex-wrap items-center gap-3 border-t border-slate-100 px-6 py-3">
+        <label class="flex items-center gap-2 text-[13px] text-slate-600">
+          <input type="checkbox" id="dk-edit-pull" class="size-4 accent-brand-600" />
+          Pull image dulu
+        </label>
+        <div class="ml-auto flex items-center gap-2">
+          <button type="button" data-close class="btn-secondary">Batal</button>
+          <button type="button" id="dk-edit-submit" class="btn-primary"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DIALOG HASIL DEPLOY ============ -->
+  <div id="dk-result-dialog" class="dialog-backdrop">
+    <div class="dialog max-w-xl">
+      <p id="dk-result-title" class="dialog-title"></p>
+      <p id="dk-result-subtitle" class="dialog-subtitle"></p>
+      <ol id="dk-result-steps" class="mt-4 max-h-[50vh] space-y-2 overflow-y-auto"></ol>
+      <div class="dialog-actions">
+        <button type="button" data-close class="btn-primary">Tutup</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  import '../lib/docker-ui/main';
+</script>

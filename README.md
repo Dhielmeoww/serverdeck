@@ -52,6 +52,16 @@ Susun rangkaian langkah lalu jalankan dengan satu klik:
   - Cek kesehatan server
 - **Import/Export JSON** untuk backup atau berbagi dengan tim.
 
+### 🐳 Docker: ala Portainer, tanpa agent
+Kelola Docker di server lewat SSH, tanpa memasang apa pun di server:
+
+- **Container**: daftar lengkap dengan status, stack Compose, image, dan port (klik untuk membuka). Aksi start, stop, restart, kill, pause, hapus.
+- **Recreate**: container Compose di-recreate lewat file compose aslinya. Container biasa dibuat ulang dari konfigurasinya, opsional dengan pull image terbaru.
+- **Edit & duplikat**: ubah image, port, volume, environment, network, restart policy, resource, dan flag lanjutan, lengkap dengan pratinjau perintah `docker run`. **Aman**: bila container baru gagal dibuat atau langsung crash, container lama dikembalikan otomatis.
+- **Detail**: ringkasan (status, jaringan, mount, environment tersamar), **logs live**, **stats** CPU/memori dengan grafik, **console interaktif** (`docker exec -it`, bash/sh), dan **inspect** JSON.
+- **Image & volume**: pull, hapus, dan bersihkan yang tidak terpakai.
+- Bekerja dengan user di grup `docker`, atau lewat `sudo` tanpa password.
+
 ### 📊 Storage
 Kapasitas setiap disk dengan status *Normal / Hampir penuh / Kritis*, pembagian pemakaian per folder yang bisa ditelusuri sampai ke sumbernya, dan pencarian file terbesar. Kamu langsung tahu apa yang memenuhi disk.
 

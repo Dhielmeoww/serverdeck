@@ -1,4 +1,4 @@
-import { Client, type ConnectConfig, type SFTPWrapper } from 'ssh2';
+import { Client, type ClientChannel, type ConnectConfig, type SFTPWrapper } from 'ssh2';
 import { nanoid } from 'nanoid';
 
 /** Unix: sh/bash/zsh. Windows: OpenSSH dengan DefaultShell cmd.exe atau PowerShell. */
@@ -18,6 +18,8 @@ export interface SSHSessionInfo {
   shell: Shell;
   /** Folder awal dalam format path SFTP (Windows: /C:/Users/nama). */
   homeDir: string;
+  /** Cara memanggil Docker di server ini ('docker' atau 'sudo -n docker'), diisi saat pertama dipakai. */
+  dockerPrefix?: string;
 }
 
 export interface ExecOptions {
@@ -306,11 +308,35 @@ export class SSHManager {
     return this.execCommand(sessionId, wrapped, options.timeoutMs ?? 0, stdin);
   }
 
+  /**
+   * Kanal exec yang tetap terbuka (stream log, konsol interaktif). Pemanggil
+   * bertanggung jawab menutupnya. Dengan `pty`, perintah mendapat terminal.
+   */
+  static openChannel(
+    sessionId: string,
+    command: string,
+    options: { pty?: { cols: number; rows: number } } = {},
+  ): Promise<ClientChannel> {
+    const session = this.getSession(sessionId);
+    if (!session) throw new Error('No active SSH session');
+    const execOptions = options.pty
+      ? { pty: { term: 'xterm-256color', cols: options.pty.cols, rows: options.pty.rows } }
+      : {};
+    return new Promise((resolve, reject) => {
+      session.client.exec(command, execOptions, (err, stream) => (err ? reject(err) : resolve(stream)));
+    });
+  }
+
   /** Seperti execCommand, tetapi exit code bukan 0 menjadi error. */
   private static async execOrThrow(sessionId: string, command: string, context: string) {
     const res = await this.execCommand(sessionId, command, 60_000);
     if (res.exitCode !== 0) throw new Error(`${context}: ${(res.stderr || res.stdout).trim() || `exit code ${res.exitCode}`}`);
     return res;
+  }
+
+  /** Cek keberadaan sesi tanpa memperbarui lastActive (untuk tugas latar belakang). */
+  static hasSession(sessionId: string): boolean {
+    return sessions.has(sessionId);
   }
 
   static getSession(sessionId: string): SSHSessionInfo | null {

@@ -3,6 +3,7 @@ import Layout from '../layouts/Layout.astro';
 import Icon from '../components/Icon.astro';
 import PipelinesView from '../components/PipelinesView.astro';
 import StorageView from '../components/StorageView.astro';
+import DockerView from '../components/DockerView.astro';
 import { SSHManager } from '../lib/ssh-session';
 import { getSessionId } from '../lib/auth-cookie';
 
@@ -46,6 +47,7 @@ const bookmarks = [
 const views = [
   { id: 'files', label: 'File Manager', icon: 'folder' },
   { id: 'pipelines', label: 'Pipelines', icon: 'workflow' },
+  { id: 'docker', label: 'Docker', icon: 'container' },
   { id: 'storage', label: 'Storage', icon: 'hardDrive' },
 ] as const;
 
@@ -318,6 +320,7 @@ const permRows = [
             </section>
 
             <PipelinesView />
+            <DockerView />
             <StorageView />
           </div>
         </main>
@@ -588,7 +591,7 @@ const permRows = [
   }
 
   // ---------- Navigasi view (File Manager / Pipelines / Storage) ----------
-  const VIEW_TITLES = { files: 'File Manager', pipelines: 'Pipelines', storage: 'Storage' };
+  const VIEW_TITLES = { files: 'File Manager', pipelines: 'Pipelines', docker: 'Docker', storage: 'Storage' };
   let currentView = 'files';
 
   function viewFromHash() {
