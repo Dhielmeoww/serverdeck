@@ -1,0 +1,357 @@
+---
+import Icon from './Icon.astro';
+---
+
+<section data-view-panel="storage" class="hidden">
+  <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div class="min-w-0">
+      <h1 class="text-[20px] font-bold tracking-tight text-slate-900">Storage</h1>
+      <p class="mt-0.5 text-[13px] text-slate-500">Kapasitas disk dan folder mana yang paling banyak memakan ruang.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="st-updated" class="text-[12px] text-slate-400"></span>
+      <button type="button" id="st-refresh" class="btn-secondary">
+        <Icon name="refresh" size={16} class="st-refresh-icon" />
+        Muat ulang
+      </button>
+    </div>
+  </div>
+
+  <!-- Ringkasan -->
+  <div id="st-kpis" class="mb-4 grid gap-3 sm:grid-cols-3"></div>
+
+  <!-- Filesystem -->
+  <div class="mb-6">
+    <p class="mb-2.5 text-[11.5px] font-semibold uppercase tracking-wide text-slate-500">Filesystem</p>
+    <div id="st-disks" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+  </div>
+
+  <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+    <!-- Pembagian per folder -->
+    <div class="card">
+      <div class="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0">
+          <p class="text-[14px] font-semibold text-slate-900">Pembagian penggunaan</p>
+          <nav id="st-crumbs" class="no-scrollbar mt-0.5 flex items-center gap-1 overflow-x-auto whitespace-nowrap font-mono text-[12px] text-slate-400"></nav>
+        </div>
+        <form id="st-path-form" class="flex items-center gap-2">
+          <input id="st-path" value="/" aria-label="Path yang dipindai" class="field-input h-8 w-44 font-mono text-[12px]" />
+          <button type="submit" class="btn-primary h-8 px-3">Pindai</button>
+        </form>
+      </div>
+      <div id="st-usage" class="p-4"></div>
+    </div>
+
+    <!-- File terbesar -->
+    <div class="card self-start">
+      <div class="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
+        <div class="min-w-0">
+          <p class="text-[14px] font-semibold text-slate-900">File terbesar</p>
+          <p id="st-largest-scope" class="mt-0.5 truncate text-[12px] text-slate-400">File di atas 10 MB</p>
+        </div>
+        <button type="button" id="st-largest-btn" class="btn-secondary h-8 px-3">
+          <Icon name="search" size={14} />
+          Cari
+        </button>
+      </div>
+      <div id="st-largest" class="p-4">
+        <p class="py-6 text-center text-[12.5px] text-slate-400">Cari file berukuran besar di bawah folder yang sedang dipindai.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  import { api, currentHost, escapeHtml, formatBytes, formatRelative, ICON, onView, spinner, svg, toast } from '../lib/client';
+
+  interface Disk { filesystem: string; type: string; size: number; used: number; available: number; mount: string }
+  interface Usage { path: string; total: number; ownFiles: number; items: { name: string; path: string; size: number }[]; partial: boolean; restricted: boolean }
+  interface Largest { path: string; files: { size: number; path: string }[] }
+
+  const $ = (id: string) => document.getElementById(id)!;
+
+  let disks: Disk[] | null = null;
+  let loadedFor = '';
+  let loadedAt = 0;
+  let scanPath = '/';
+  let scanning = false;
+  const usageCache = new Map<string, Usage>();
+
+  // Ambang status: warna selalu disertai ikon dan label, tidak berdiri sendiri.
+  function tone(percent: number) {
+    if (percent >= 90) return { label: 'Kritis', fill: '#d03b3b', track: 'bg-red-100', badge: 'badge-red', icon: ICON.alert };
+    if (percent >= 75) return { label: 'Hampir penuh', fill: '#fab219', track: 'bg-amber-100', badge: 'badge-amber', icon: ICON.alert };
+    return { label: 'Normal', fill: '#1B7A5C', track: 'bg-brand-100', badge: 'badge-green', icon: ICON.check };
+  }
+
+  const pct = (part: number, whole: number) => (whole ? (part / whole) * 100 : 0);
+  const pctText = (value: number) => (value >= 10 || value === 0 ? Math.round(value) : value.toFixed(1)) + '%';
+
+  // ---------- Filesystem ----------
+  function renderKpis() {
+    const el = $('st-kpis');
+    if (!disks?.length) {
+      el.innerHTML = '';
+      return;
+    }
+    const size = disks.reduce((s, d) => s + d.size, 0);
+    const used = disks.reduce((s, d) => s + d.used, 0);
+    const available = disks.reduce((s, d) => s + d.available, 0);
+    const fullest = [...disks].sort((a, b) => pct(b.used, b.size) - pct(a.used, a.size))[0];
+    const fullestPct = pct(fullest.used, fullest.size);
+    const t = tone(fullestPct);
+
+    const tile = (label: string, value: string, sub: string) => `
+      <div class="card px-4 py-3.5">
+        <p class="text-[12px] font-medium text-slate-500">${label}</p>
+        <p class="mt-1 text-[22px] font-bold tracking-tight text-slate-900">${value}</p>
+        <p class="mt-0.5 truncate text-[12px] text-slate-400">${sub}</p>
+      </div>`;
+
+    el.innerHTML =
+      tile('Terpakai', formatBytes(used), `dari ${formatBytes(size)} · ${pctText(pct(used, size))}`) +
+      tile('Tersedia', formatBytes(available), `di ${disks.length} filesystem`) +
+      `<div class="card px-4 py-3.5">
+         <p class="text-[12px] font-medium text-slate-500">Paling penuh</p>
+         <p class="mt-1 flex items-baseline gap-2">
+           <span class="text-[22px] font-bold tracking-tight text-slate-900">${pctText(fullestPct)}</span>
+           <span class="truncate font-mono text-[12.5px] text-slate-600">${escapeHtml(fullest.mount)}</span>
+         </p>
+         <p class="mt-1"><span class="badge ${t.badge}">${svg(t.icon, 'size-3', 2.4)}${t.label}</span></p>
+       </div>`;
+  }
+
+  function renderDisks() {
+    const el = $('st-disks');
+    if (!disks) {
+      el.innerHTML = [1, 2, 3].map(() => '<div class="card h-[132px] animate-pulse bg-slate-50"></div>').join('');
+      return;
+    }
+    if (!disks.length) {
+      el.innerHTML = '<div class="card col-span-full px-4 py-8 text-center text-[13px] text-slate-400">Tidak ada filesystem yang terbaca dari <code class="font-mono">df</code>.</div>';
+      return;
+    }
+
+    el.innerHTML = disks
+      .map((d) => {
+        const used = pct(d.used, d.size);
+        const t = tone(used);
+        return `
+          <div class="card p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <button type="button" data-scan="${escapeHtml(d.mount)}" class="truncate font-mono text-[13.5px] font-semibold text-slate-900 hover:text-brand-700" title="Pindai ${escapeHtml(d.mount)}">${escapeHtml(d.mount)}</button>
+                <p class="truncate text-[11.5px] text-slate-400"><span class="font-mono">${escapeHtml(d.filesystem)}</span>${d.type ? ` · ${escapeHtml(d.type)}` : ''}</p>
+              </div>
+              <span class="badge ${t.badge} shrink-0">${svg(t.icon, 'size-3', 2.4)}${t.label}</span>
+            </div>
+            <div class="mt-4 flex items-baseline justify-between">
+              <span class="text-[20px] font-bold tracking-tight text-slate-900">${pctText(used)}</span>
+              <span class="text-[12px] text-slate-500">${formatBytes(d.used)} / ${formatBytes(d.size)}</span>
+            </div>
+            <div class="mt-2 h-2 overflow-hidden rounded-full ${t.track}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(used)}" aria-label="Pemakaian ${escapeHtml(d.mount)}">
+              <div class="h-full rounded-full" style="width:${Math.min(100, used).toFixed(2)}%;background:${t.fill}"></div>
+            </div>
+            <p class="mt-2 text-[12px] text-slate-400">${formatBytes(d.available)} tersedia</p>
+          </div>`;
+      })
+      .join('');
+  }
+
+  async function loadDisks() {
+    disks = null;
+    renderDisks();
+    try {
+      const data = await api<{ disks: Disk[] }>('/api/storage?action=disks');
+      disks = data.disks;
+      loadedAt = Date.now();
+      $('st-updated').textContent = `Diperbarui ${formatRelative(loadedAt)}`;
+    } catch (err: any) {
+      disks = [];
+      toast(err.message, 'error');
+    }
+    renderDisks();
+    renderKpis();
+  }
+
+  // ---------- Pembagian folder ----------
+  function renderCrumbs(path: string) {
+    const segments = path.split('/').filter(Boolean);
+    let accum = '';
+    const crumbs = [`<button type="button" data-scan="/" class="hover:text-slate-700">/</button>`];
+    segments.forEach((seg, i) => {
+      accum += '/' + seg;
+      const last = i === segments.length - 1;
+      crumbs.push(
+        last
+          ? `<span class="text-slate-700">${escapeHtml(seg)}</span>`
+          : `<button type="button" data-scan="${escapeHtml(accum)}" class="hover:text-slate-700">${escapeHtml(seg)}</button>`,
+      );
+      if (!last) crumbs.push('<span>/</span>');
+    });
+    $('st-crumbs').innerHTML = crumbs.join(segments.length ? '' : '');
+  }
+
+  const MAX_ROWS = 20;
+
+  function barRow(opts: { name: string; size: number; total: number; max: number; path?: string; muted?: boolean; drill?: boolean }) {
+    const share = pct(opts.size, opts.total);
+    const width = Math.max(0.5, pct(opts.size, opts.max));
+    const fill = opts.muted ? '#94a3b8' : '#268E6B';
+    const nameHtml = opts.drill && opts.path
+      ? `<button type="button" data-scan="${escapeHtml(opts.path)}" class="truncate text-left font-medium text-slate-800 hover:text-brand-700">${escapeHtml(opts.name)}</button>`
+      : `<span class="truncate ${opts.muted ? 'text-slate-500' : 'font-medium text-slate-800'}">${escapeHtml(opts.name)}</span>`;
+    const open = opts.path
+      ? `<button type="button" data-open="${escapeHtml(opts.path)}" class="icon-btn size-7 lg:opacity-0 lg:group-hover:opacity-100" title="Buka di File Manager" aria-label="Buka di File Manager">${svg(ICON.external, 'size-3.5')}</button>`
+      : '<span class="size-7"></span>';
+
+    return `
+      <div class="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg px-2 py-1.5 hover:bg-slate-50 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]" title="${escapeHtml(opts.name)}: ${opts.size.toLocaleString('id-ID')} byte (${pctText(share)})">
+        <div class="flex min-w-0 items-center gap-2 text-[13px]">
+          ${svg(opts.muted ? ICON.file : ICON.folder, `size-4 shrink-0 ${opts.muted ? 'text-slate-400' : 'text-amber-500'}`)}
+          ${nameHtml}
+        </div>
+        <div class="col-span-2 row-start-2 mt-1 h-2 sm:col-span-1 sm:row-start-auto sm:mt-0">
+          <div class="h-full rounded-r-[4px]" style="width:${width.toFixed(2)}%;background:${fill}"></div>
+        </div>
+        <div class="flex items-center gap-2 text-right">
+          <span class="w-16 text-[12.5px] font-semibold tabular-nums text-slate-800">${formatBytes(opts.size)}</span>
+          <span class="w-12 text-[12px] tabular-nums text-slate-400">${pctText(share)}</span>
+          ${open}
+        </div>
+      </div>`;
+  }
+
+  function renderUsage(usage: Usage) {
+    const el = $('st-usage');
+    const rows = usage.items.slice(0, MAX_ROWS);
+    const rest = usage.items.slice(MAX_ROWS);
+    const restSize = rest.reduce((s, i) => s + i.size, 0);
+    const max = Math.max(...rows.map((r) => r.size), usage.ownFiles, restSize, 1);
+
+    const notes: string[] = [];
+    if (usage.partial) notes.push('Pemindaian melewati batas 60 detik, hasil bisa belum lengkap.');
+    if (usage.restricted) notes.push('Sebagian folder tidak bisa dibaca karena izin akses. Login sebagai root untuk hasil lengkap.');
+
+    const top = usage.items[0];
+    el.innerHTML = `
+      <div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span class="text-[22px] font-bold tracking-tight text-slate-900">${formatBytes(usage.total)}</span>
+        <span class="text-[12.5px] text-slate-500">di <span class="font-mono">${escapeHtml(usage.path)}</span>${top ? ` · terbesar <span class="font-medium text-slate-700">${escapeHtml(top.name)}</span> (${pctText(pct(top.size, usage.total))})` : ''}</span>
+      </div>
+      ${notes.map((n) => `<div class="mb-3 flex gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">${svg(ICON.alert, 'size-4 shrink-0')}<span>${n}</span></div>`).join('')}
+      <div class="-mx-2 space-y-0.5">
+        ${rows.map((r) => barRow({ name: r.name, size: r.size, total: usage.total, max, path: r.path, drill: true })).join('')}
+        ${restSize ? barRow({ name: `${rest.length} folder lainnya`, size: restSize, total: usage.total, max, muted: true }) : ''}
+        ${usage.ownFiles ? barRow({ name: 'File langsung di folder ini', size: usage.ownFiles, total: usage.total, max, muted: true, path: usage.path }) : ''}
+        ${!rows.length && !usage.ownFiles ? '<p class="py-6 text-center text-[12.5px] text-slate-400">Folder ini kosong atau tidak bisa dibaca.</p>' : ''}
+      </div>
+      <p class="mt-4 text-[11.5px] text-slate-400">Hanya menghitung filesystem yang sama (<code class="font-mono">du -x</code>). Klik nama folder untuk menelusuri lebih dalam.</p>`;
+  }
+
+  async function scan(path: string, force = false) {
+    path = (path.trim().replace(/\/+$/, '') || '/').replace(/\/+/g, '/');
+    if (!path.startsWith('/')) return toast('Path harus absolut, contoh /var', 'error');
+    if (scanning) return toast('Tunggu pemindaian yang sedang berjalan selesai', 'info');
+
+    scanPath = path;
+    ($('st-path') as HTMLInputElement).value = path;
+    $('st-largest-scope').textContent = `File di atas 10 MB di ${path}`;
+    renderCrumbs(path);
+
+    const cached = usageCache.get(path);
+    if (cached && !force) return renderUsage(cached);
+
+    scanning = true;
+    $('st-usage').innerHTML = `
+      <div class="flex flex-col items-center py-12 text-center text-brand-600">
+        ${spinner('size-5')}
+        <p class="mt-3 text-[13px] font-medium text-slate-700">Memindai <span class="font-mono">${escapeHtml(path)}</span>…</p>
+        <p class="mt-1 text-[12px] text-slate-400">Folder besar bisa butuh hingga 60 detik.</p>
+      </div>`;
+    try {
+      const usage = await api<Usage>(`/api/storage?action=usage&path=${encodeURIComponent(path)}`);
+      usageCache.set(path, usage);
+      if (scanPath === path) renderUsage(usage);
+    } catch (err: any) {
+      $('st-usage').innerHTML = `<p class="py-8 text-center text-[13px] text-red-600">${escapeHtml(err.message)}</p>`;
+    } finally {
+      scanning = false;
+    }
+  }
+
+  // ---------- File terbesar ----------
+  async function findLargest() {
+    const btn = $('st-largest-btn') as HTMLButtonElement;
+    const el = $('st-largest');
+    const path = scanPath;
+    btn.disabled = true;
+    el.innerHTML = `<div class="flex items-center justify-center gap-2 py-8 text-[12.5px] text-slate-500">${spinner('size-4 text-brand-600')}Mencari di <span class="font-mono">${escapeHtml(path)}</span>…</div>`;
+
+    try {
+      const data = await api<Largest>(`/api/storage?action=largest&path=${encodeURIComponent(path)}`);
+      if (!data.files.length) {
+        el.innerHTML = '<p class="py-6 text-center text-[12.5px] text-slate-400">Tidak ada file di atas 10 MB.</p>';
+        return;
+      }
+      const max = data.files[0].size;
+      el.innerHTML = `<div class="-mx-2 space-y-0.5">${data.files
+        .map((f) => {
+          const dir = f.path.slice(0, f.path.lastIndexOf('/')) || '/';
+          const name = f.path.slice(f.path.lastIndexOf('/') + 1);
+          return `
+            <div class="group rounded-lg px-2 py-1.5 hover:bg-slate-50" title="${escapeHtml(f.path)}: ${f.size.toLocaleString('id-ID')} byte">
+              <div class="flex items-center gap-2">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-[13px] font-medium text-slate-800">${escapeHtml(name)}</p>
+                  <p class="truncate font-mono text-[11px] text-slate-400">${escapeHtml(dir)}</p>
+                </div>
+                <span class="text-[12.5px] font-semibold tabular-nums text-slate-800">${formatBytes(f.size)}</span>
+                <button type="button" data-open="${escapeHtml(dir)}" class="icon-btn size-7 lg:opacity-0 lg:group-hover:opacity-100" title="Buka folder" aria-label="Buka folder">${svg(ICON.external, 'size-3.5')}</button>
+              </div>
+              <div class="mt-1 h-1.5"><div class="h-full rounded-r-[4px]" style="width:${Math.max(1, pct(f.size, max)).toFixed(2)}%;background:#268E6B"></div></div>
+            </div>`;
+        })
+        .join('')}</div>`;
+    } catch (err: any) {
+      el.innerHTML = `<p class="py-6 text-center text-[13px] text-red-600">${escapeHtml(err.message)}</p>`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ---------- Event ----------
+  document.querySelector('[data-view-panel="storage"]')!.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    const scanBtn = target.closest<HTMLElement>('[data-scan]');
+    if (scanBtn) return void scan(scanBtn.dataset.scan!);
+    const open = target.closest<HTMLElement>('[data-open]');
+    if (open) window.openInFiles?.(open.dataset.open!);
+  });
+
+  $('st-path-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    scan(($('st-path') as HTMLInputElement).value, true);
+  });
+
+  $('st-largest-btn').addEventListener('click', findLargest);
+
+  $('st-refresh').addEventListener('click', async () => {
+    const icon = document.querySelector('.st-refresh-icon');
+    icon?.classList.add('animate-spin');
+    usageCache.clear();
+    await Promise.all([loadDisks(), scan(scanPath, true)]);
+    icon?.classList.remove('animate-spin');
+  });
+
+  onView('storage', () => {
+    // Data dimuat sekali per host; tombol muat ulang untuk data terbaru.
+    const host = currentHost();
+    if (loadedFor === host && disks) return;
+    loadedFor = host;
+    usageCache.clear();
+    $('st-largest').innerHTML = '<p class="py-6 text-center text-[12.5px] text-slate-400">Cari file berukuran besar di bawah folder yang sedang dipindai.</p>';
+    loadDisks();
+    scan('/', true);
+  });
+</script>

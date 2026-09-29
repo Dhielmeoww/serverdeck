@@ -1,0 +1,151 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+/* Warna merek mengikuti vue-eproc: satu skala, dipakai lewat perannya
+   (brand-600 tombol utama, brand-50 latar aktif). */
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-brand-50: #EEF8F3;
+  --color-brand-100: #D5EFE3;
+  --color-brand-200: #ABDEC8;
+  --color-brand-300: #7CC8A5;
+  --color-brand-400: #45A882;
+  --color-brand-500: #268E6B;
+  --color-brand-600: #1B7A5C;
+  --color-brand-700: #17624C;
+  --color-brand-800: #154F3F;
+  --color-brand-900: #123F34;
+}
+
+@layer base {
+  /* Ruang scrollbar selalu disediakan, supaya isi tidak bergeser. */
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  html,
+  body {
+    @apply bg-white font-sans text-slate-700 antialiased;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+/* Komponen dasar gaya clean: tombol, isian, lencana, dialog. */
+@layer components {
+  .btn-primary {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3.5 text-[13px] font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-secondary {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60;
+  }
+  .btn-danger {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3.5 text-[13px] font-semibold text-white transition hover:bg-red-700 disabled:opacity-60;
+  }
+  .icon-btn {
+    @apply inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .field-label {
+    @apply mb-1.5 block text-[12.5px] font-medium text-slate-700;
+  }
+  .field-input {
+    @apply h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100;
+  }
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+  }
+  .badge-green { @apply bg-emerald-50 text-emerald-700; }
+  .badge-slate { @apply bg-slate-100 text-slate-500; }
+  .badge-brand { @apply bg-brand-50 text-brand-700; }
+  .badge-amber { @apply bg-amber-50 text-amber-700; }
+  .badge-red { @apply bg-red-50 text-red-700; }
+  .badge-violet { @apply bg-violet-50 text-violet-700; }
+
+  .nav-item {
+    @apply flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900;
+  }
+  .nav-item.is-active {
+    @apply bg-brand-50 text-brand-700 hover:bg-brand-50 hover:text-brand-700;
+  }
+  .nav-item svg { @apply size-[17px] shrink-0; }
+
+  .segmented {
+    @apply grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1;
+  }
+  .segmented button {
+    @apply h-7 rounded-md text-[12.5px] font-medium text-slate-500 transition hover:text-slate-800;
+  }
+  .segmented button.is-active {
+    @apply bg-white text-slate-900 shadow-sm;
+  }
+
+  .dialog-backdrop {
+    @apply fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm;
+  }
+  .dialog {
+    @apply w-full rounded-2xl bg-white p-6 shadow-xl;
+  }
+  .dialog-title {
+    @apply text-[15px] font-semibold text-slate-900;
+  }
+  .dialog-subtitle {
+    @apply mt-0.5 text-[13px] text-slate-500;
+  }
+  .dialog-actions {
+    @apply mt-6 flex items-center justify-end gap-2;
+  }
+}
+
+/* Scrollbar tipis */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.terminal-scroll::-webkit-scrollbar-thumb { background: #334155; }
+
+/* Toast */
+#toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 380px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  color: #334155;
+  font-size: 13px;
+  box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.25);
+  transform: translateY(-8px);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.toast.show {
+  transform: translateY(0);
+  opacity: 1;
+}

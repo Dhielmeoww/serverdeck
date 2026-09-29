@@ -1,0 +1,1288 @@
+---
+import Icon from './Icon.astro';
+---
+
+<section data-view-panel="pipelines" class="hidden">
+  <!-- ============ DAFTAR ============ -->
+  <div id="pl-list-screen">
+    <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div class="min-w-0">
+        <h1 class="text-[20px] font-bold tracking-tight text-slate-900">Pipelines</h1>
+        <p class="mt-0.5 text-[13px] text-slate-500">Rangkaian langkah otomatis yang dijalankan berurutan di server yang sedang terhubung.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" data-help class="btn-secondary">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg>
+          Petunjuk
+        </button>
+        <label class="btn-secondary cursor-pointer">
+          <Icon name="upload" size={16} />
+          Import
+          <input type="file" id="pl-import-input" accept="application/json,.json" class="hidden" />
+        </label>
+        <button type="button" id="pl-export-all" class="btn-secondary">
+          <Icon name="save" size={16} />
+          Ekspor semua
+        </button>
+        <button type="button" id="pl-new" class="btn-primary">
+          <Icon name="plus" size={16} stroke={2.2} />
+          Pipeline baru
+        </button>
+      </div>
+    </div>
+
+    <div class="mb-5 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <Icon name="lock" size={16} class="mt-0.5 shrink-0 text-slate-500" />
+      <p class="text-[12.5px] leading-relaxed text-slate-600">
+        Pipeline, variabel, dan riwayat run hanya disimpan di <span class="font-medium text-slate-800">localStorage browser ini</span>, tidak di server ServerDeck.
+        Perintah baru dikirim ke server SSH tujuan saat pipeline dijalankan. Hindari menyimpan password di variabel.
+        <span id="pl-storage-size" class="text-slate-400"></span>
+      </p>
+    </div>
+
+    <div id="pl-grid" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"></div>
+  </div>
+
+  <!-- ============ EDITOR ============ -->
+  <div id="pl-editor-screen" class="hidden">
+    <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div class="flex min-w-0 flex-1 items-start gap-3">
+        <button type="button" id="pl-back" class="icon-btn mt-0.5 size-9 border border-slate-200" title="Kembali ke daftar" aria-label="Kembali ke daftar">
+          <svg class="size-[17px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        </button>
+        <div class="min-w-0 flex-1">
+          <input id="pl-name" aria-label="Nama pipeline" class="-mx-1.5 w-full rounded-md bg-transparent px-1.5 text-[20px] font-bold tracking-tight text-slate-900 outline-none transition hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-brand-100" />
+          <input id="pl-desc" aria-label="Deskripsi" placeholder="Tambahkan deskripsi…" class="-mx-1.5 mt-0.5 w-full rounded-md bg-transparent px-1.5 text-[13px] text-slate-500 outline-none transition placeholder:text-slate-400 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-brand-100" />
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="pl-saved" class="mr-1 text-[12px] text-slate-400"></span>
+        <button type="button" data-help class="icon-btn size-9 border border-slate-200" title="Petunjuk" aria-label="Petunjuk">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg>
+        </button>
+        <button type="button" id="pl-export" class="icon-btn size-9 border border-slate-200" title="Ekspor JSON" aria-label="Ekspor JSON">
+          <Icon name="save" size={16} />
+        </button>
+        <button type="button" id="pl-delete" class="icon-btn size-9 border border-slate-200 hover:bg-red-50 hover:text-red-600" title="Hapus pipeline" aria-label="Hapus pipeline">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+        <button type="button" id="pl-run" class="btn-primary"></button>
+      </div>
+    </div>
+
+    <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <!-- Alur -->
+      <div class="pl-canvas min-h-[480px] rounded-xl border border-slate-200 px-4 py-8 sm:px-8">
+        <div id="pl-flow" class="mx-auto flex max-w-xl flex-col"></div>
+      </div>
+
+      <!-- Panel -->
+      <aside class="lg:sticky lg:top-24 lg:self-start">
+        <div class="card overflow-hidden">
+          <div class="border-b border-slate-100 p-3">
+            <div class="segmented grid-cols-3" id="pl-tabs">
+              <button type="button" data-tab="step">Langkah</button>
+              <button type="button" data-tab="vars">Variabel</button>
+              <button type="button" data-tab="runs">Riwayat</button>
+            </div>
+          </div>
+          <div id="pl-panel" class="max-h-[calc(100vh-13rem)] overflow-y-auto p-4"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ============ DIALOG TEMPLATE ============ -->
+  <div id="pl-template-dialog" class="dialog-backdrop">
+    <div class="dialog max-w-lg">
+      <p class="dialog-title">Pipeline baru</p>
+      <p class="dialog-subtitle">Mulai dari template, lalu sesuaikan langkah dan variabelnya.</p>
+      <div id="pl-template-list" class="mt-5 space-y-2"></div>
+      <div class="dialog-actions">
+        <button type="button" data-close class="btn-secondary">Batal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DIALOG RUN ============ -->
+  <div id="pl-run-dialog" class="dialog-backdrop">
+    <form id="pl-run-form" class="dialog max-w-md" autocomplete="off">
+      <p id="pl-run-title" class="dialog-title">Jalankan pipeline?</p>
+      <p id="pl-run-subtitle" class="dialog-subtitle"></p>
+
+      <ol id="pl-run-steps" class="mt-4 max-h-52 space-y-1 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-[12.5px] text-slate-600"></ol>
+
+      <div id="pl-run-sudo" class="mt-4 hidden">
+        <label for="pl-sudo-password" class="field-label">Password sudo <span class="font-normal text-slate-400">(opsional)</span></label>
+        <input type="password" id="pl-sudo-password" autocomplete="new-password" placeholder="Kosongkan bila login root / NOPASSWD" class="field-input" />
+        <p class="mt-1.5 flex gap-1.5 text-[11.5px] leading-relaxed text-slate-400">
+          <Icon name="lock" size={13} class="mt-0.5 shrink-0" />
+          Pipeline ini memakai sudo. Password hanya disimpan di memori selama run, dikirim lewat stdin (tidak muncul di daftar proses), dan tidak disimpan di browser.
+        </p>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" data-run-cancel class="btn-secondary">Batal</button>
+        <button type="submit" class="btn-primary">
+          <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16l13-8Z"/></svg>
+          Jalankan
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ============ DIALOG PETUNJUK ============ -->
+  <div id="pl-help-dialog" class="dialog-backdrop">
+    <div class="flex h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+      <div class="flex items-center gap-3 border-b border-slate-100 px-6 py-4">
+        <div class="min-w-0 flex-1">
+          <p class="dialog-title">Petunjuk Pipelines</p>
+          <p class="text-[12.5px] text-slate-500">Cara membuat, menjalankan, dan mengamankan pipeline.</p>
+        </div>
+        <button type="button" data-help-close class="icon-btn" aria-label="Tutup petunjuk">
+          <Icon name="close" size={18} />
+        </button>
+      </div>
+
+      <div class="flex min-h-0 flex-1">
+        <nav id="pl-help-toc" class="hidden w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-slate-100 p-3 md:block">
+          <a href="#help-intro" class="nav-item py-1.5">Ringkasan</a>
+          <a href="#help-create" class="nav-item py-1.5">Membuat pipeline</a>
+          <a href="#help-steps" class="nav-item py-1.5">Jenis langkah</a>
+          <a href="#help-vars" class="nav-item py-1.5">Variabel</a>
+          <a href="#help-flow" class="nav-item py-1.5">Kondisi & kegagalan</a>
+          <a href="#help-sudo" class="nav-item py-1.5">Memakai sudo</a>
+          <a href="#help-run" class="nav-item py-1.5">Menjalankan & riwayat</a>
+          <a href="#help-ssl" class="nav-item py-1.5">Contoh: domain + SSL</a>
+          <a href="#help-privacy" class="nav-item py-1.5">Privasi & backup</a>
+          <a href="#help-limits" class="nav-item py-1.5">Batasan</a>
+        </nav>
+
+        <div id="pl-help-body" class="help-body min-w-0 flex-1 overflow-y-auto px-6 py-5">
+          <section id="help-intro">
+            <h3>Ringkasan</h3>
+            <p>Pipeline adalah rangkaian langkah yang dijalankan <b>berurutan</b> di server yang sedang terhubung. Setiap langkah menunggu langkah sebelumnya selesai. Bila satu langkah gagal, langkah berikutnya dilewati (kecuali diatur <i>lanjutkan bila gagal</i>).</p>
+            <p>Alur dibaca dari atas ke bawah: <b>Manual trigger</b> → langkah 1 → langkah 2 → … → <b>Selesai</b>. Garis penghubung menyala hijau sampai langkah terakhir yang dijangkau run.</p>
+          </section>
+
+          <section id="help-create">
+            <h3>Membuat pipeline</h3>
+            <ol>
+              <li>Klik <b>Pipeline baru</b>, lalu pilih template atau <i>Pipeline kosong</i>.</li>
+              <li>Klik tombol <b>+</b> di antara langkah untuk menyisipkan langkah baru, lalu pilih jenisnya.</li>
+              <li>Klik kartu langkah untuk mengisi detailnya di panel kanan (tab <b>Langkah</b>).</li>
+              <li>Isi nilai yang dipakai berulang di tab <b>Variabel</b>.</li>
+              <li>Susun ulang dengan tombol panah, duplikat, atau hapus langkah lewat ikon di kartu.</li>
+            </ol>
+            <p>Semua perubahan tersimpan otomatis. Tidak ada tombol simpan.</p>
+          </section>
+
+          <section id="help-steps">
+            <h3>Jenis langkah</h3>
+            <div class="help-table">
+              <table>
+                <thead><tr><th>Jenis</th><th>Fungsi</th><th>Dianggap berhasil bila</th></tr></thead>
+                <tbody>
+                  <tr><td><b>Command</b></td><td>Menjalankan perintah shell. Bisa multi-baris dan punya folder kerja.</td><td>Exit code 0</td></tr>
+                  <tr><td><b>Kondisi (IF)</b></td><td>Menjalankan perintah pengecekan, lalu memutuskan lanjut atau berhenti.</td><td>Syarat terpenuhi (bila tidak: run <i>Berhenti</i>)</td></tr>
+                  <tr><td><b>Tulis file</b></td><td>Membuat atau menimpa file. Centang <i>Tulis dengan sudo</i> untuk folder milik root seperti <code>/etc/nginx</code>.</td><td>File tertulis</td></tr>
+                  <tr><td><b>HTTP check</b></td><td>Memanggil URL dari server dengan <code>curl</code>. Alamat internal seperti <code>127.0.0.1</code> bisa dipakai.</td><td>Status code termasuk daftar yang diharapkan</td></tr>
+                  <tr><td><b>Tunggu</b></td><td>Jeda beberapa detik, misalnya menunggu service naik.</td><td>Selalu</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="help-vars">
+            <h3>Variabel</h3>
+            <p>Tulis <code>{"{{NAMA}}"}</code> di perintah, path, URL, atau isi file. Nilainya diambil dari tab <b>Variabel</b> saat run. Nama variabel hanya huruf besar, angka, dan garis bawah.</p>
+            <pre>sudo certbot --nginx -d {"{{DOMAIN}}"}</pre>
+            <p><code>{"{{PREV_OUTPUT}}"}</code> berisi output (stdout) langkah sebelumnya. Variabel yang dipakai tapi belum diisi ditandai, dan pipeline menolak dijalankan sampai diisi.</p>
+            <p class="help-note">Variabel disimpan sebagai teks biasa di browser. Jangan isi password atau token.</p>
+          </section>
+
+          <section id="help-flow">
+            <h3>Kondisi & kegagalan</h3>
+            <ul>
+              <li><b>Kondisi (IF)</b> memilih salah satu: exit code = 0, exit code ≠ 0, output mengandung teks, atau output tidak mengandung teks. Bila tidak terpenuhi, sisa langkah dilewati dan run berstatus <b>Berhenti</b>, bukan <b>Gagal</b>.</li>
+              <li><b>Jika gagal</b> di setiap langkah: <i>Hentikan pipeline</i> (bawaan) atau <i>Lanjutkan ke langkah berikutnya</i>. Run tetap ditandai Gagal bila ada langkah yang gagal.</li>
+              <li><b>Timeout</b> (bawaan 300 detik, maksimal 3600). Perintah yang melewati batas dihentikan dan dianggap gagal.</li>
+            </ul>
+            <p>Contoh: jalankan renew hanya bila sertifikat tersisa kurang dari 30 hari:</p>
+            <pre>openssl x509 -checkend $(( 30 * 86400 )) -noout -in /etc/letsencrypt/live/{"{{DOMAIN}}"}/cert.pem</pre>
+            <p>dengan <i>Lanjut jika: Exit code ≠ 0</i>.</p>
+          </section>
+
+          <section id="help-sudo">
+            <h3>Memakai sudo</h3>
+            <p>Perintah dijalankan tanpa terminal interaktif, jadi sudo tidak bisa menampilkan prompt password. ServerDeck menanganinya begini:</p>
+            <ul>
+              <li>Bila pipeline memakai <code>sudo</code>, dialog <b>Jalankan</b> meminta <b>password sudo</b>. Password hanya ada di memori selama run, dikirim lewat stdin ke helper <code>SUDO_ASKPASS</code> sementara (dihapus lagi setelah perintah selesai), dan tidak pernah disimpan di browser maupun muncul di daftar proses.</li>
+              <li>Bila dikosongkan, sudo dijalankan dengan <code>-n</code>: langsung gagal dengan pesan jelas bila butuh password, bukan menggantung sampai timeout.</li>
+              <li>Login sebagai <code>root</code> atau aturan <code>NOPASSWD</code> tidak butuh password sama sekali.</li>
+            </ul>
+            <p>Contoh aturan NOPASSWD yang sempit (edit dengan <code>sudo visudo -f /etc/sudoers.d/serverdeck</code>):</p>
+            <pre>deploy ALL=(root) NOPASSWD: /usr/sbin/nginx, /usr/bin/systemctl reload nginx, /usr/bin/systemctl restart nginx, /usr/bin/certbot, /usr/bin/tee /etc/nginx/conf.d/*</pre>
+            <p>Terminal di bagian bawah juga memakai <code>sudo -n</code>. Untuk perintah sudo yang butuh password, gunakan pipeline.</p>
+          </section>
+
+          <section id="help-run">
+            <h3>Menjalankan & riwayat</h3>
+            <ul>
+              <li>Klik <b>Jalankan</b>. Dialog menampilkan daftar langkah aktif dan server tujuan sebelum ada perintah yang dikirim.</li>
+              <li>Status tiap langkah tampil langsung di kartunya: berjalan, berhasil, gagal, berhenti, atau dilewati. Klik <b>Output</b> untuk melihat stdout/stderr. Output langkah yang gagal terbuka otomatis.</li>
+              <li><b>Hentikan</b> berhenti setelah langkah yang sedang berjalan. Perintah yang sudah terkirim tetap berjalan di server sampai selesai.</li>
+              <li>Tab <b>Riwayat</b> menyimpan 10 run terakhir (output dipotong 4.000 karakter per langkah). Klik salah satu untuk menampilkannya di alur.</li>
+              <li>Run berjalan di tab browser ini. Jangan tutup tab sampai run selesai.</li>
+            </ul>
+          </section>
+
+          <section id="help-ssl">
+            <h3>Contoh: tambah domain + SSL</h3>
+            <p>Template <b>Tambah domain + SSL baru</b> membuat reverse proxy untuk domain baru lalu menerbitkan sertifikat Let's Encrypt:</p>
+            <ol>
+              <li><code>sudo nginx -t</code>: pastikan konfigurasi sekarang sehat.</li>
+              <li>Kondisi: berhenti bila <code>{"{{CONF_DIR}}/{{NAME}}.conf"}</code> sudah ada, supaya konfigurasi yang sudah diubah certbot tidak tertimpa.</li>
+              <li>Cek DNS domain bisa di-resolve.</li>
+              <li>Tulis server block dengan sudo (<code>listen 80</code>, <code>proxy_pass {"{{UPSTREAM}}"}</code>).</li>
+              <li><code>sudo nginx -t</code> lagi. Bila gagal, file baru dihapus otomatis.</li>
+              <li>Reload Nginx, lalu <code>sudo certbot --nginx -d {"{{DOMAIN}}"} --redirect</code>.</li>
+              <li>Restart Nginx, cek HTTPS, tampilkan info sertifikat.</li>
+            </ol>
+            <p class="help-note"><code>certbot -d</code> diisi <b>nama domain</b> (mis. <code>app.example.com</code>), bukan nama file <code>.conf</code>. Sebelum run, pastikan DNS domain sudah mengarah ke IP server dan port 80/443 terbuka.</p>
+            <p>Isi <code>EMAIL</code> agar mendapat pemberitahuan kedaluwarsa dari Let's Encrypt. Bila kosong, certbot mendaftar tanpa email.</p>
+          </section>
+
+          <section id="help-privacy">
+            <h3>Privasi & backup</h3>
+            <ul>
+              <li>Pipeline, variabel, dan riwayat run disimpan hanya di <b>localStorage browser ini</b>. Server ServerDeck tidak menyimpannya.</li>
+              <li>Membersihkan data situs di browser akan menghapus semua pipeline. Gunakan <b>Ekspor semua</b> untuk backup, dan <b>Import</b> untuk memindahkannya ke browser atau komputer lain.</li>
+              <li>File ekspor tidak menyertakan riwayat run (bisa berisi output sensitif), tetapi menyertakan variabel.</li>
+            </ul>
+          </section>
+
+          <section id="help-limits">
+            <h3>Batasan</h3>
+            <ul>
+              <li><b>Server Windows</b>: perintah dijalankan di shell bawaan server (cmd.exe atau PowerShell). Template bawaan ditulis untuk Linux. Fitur sudo dan <i>Tulis dengan sudo</i> tidak berlaku.</li>
+              <li>Hanya satu pipeline bisa berjalan pada satu waktu.</li>
+              <li>Perintah interaktif (editor, prompt konfirmasi) tidak didukung. Pakai flag non-interaktif seperti <code>-y</code> atau <code>--non-interactive</code>.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DIALOG TAMBAH LANGKAH ============ -->
+  <div id="pl-step-dialog" class="dialog-backdrop">
+    <div class="dialog max-w-lg">
+      <p class="dialog-title">Tambah langkah</p>
+      <p class="dialog-subtitle">Pilih jenis aksi untuk langkah ini.</p>
+      <div id="pl-step-types" class="mt-5 grid gap-2 sm:grid-cols-2"></div>
+      <div class="dialog-actions">
+        <button type="button" data-close class="btn-secondary">Batal</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .pl-canvas {
+    background-color: #f8fafc;
+    background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+
+  .help-body section + section {
+    margin-top: 1.75rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid #f1f5f9;
+  }
+  .help-body section {
+    scroll-margin-top: 1rem;
+  }
+  .help-body h3 {
+    margin-bottom: 0.5rem;
+    font-size: 15px;
+    font-weight: 600;
+    color: #0f172a;
+  }
+  .help-body p,
+  .help-body li {
+    font-size: 13px;
+    line-height: 1.65;
+    color: #475569;
+  }
+  .help-body p + p,
+  .help-body p + ul,
+  .help-body p + ol,
+  .help-body ul + p,
+  .help-body ol + p,
+  .help-body pre + p {
+    margin-top: 0.6rem;
+  }
+  .help-body ul,
+  .help-body ol {
+    margin-top: 0.4rem;
+    padding-left: 1.25rem;
+  }
+  .help-body ul { list-style: disc; }
+  .help-body ol { list-style: decimal; }
+  .help-body li + li { margin-top: 0.3rem; }
+  .help-body b { font-weight: 600; color: #1e293b; }
+  .help-body code {
+    border-radius: 4px;
+    background: #f1f5f9;
+    padding: 1px 5px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: #334155;
+  }
+  .help-body pre {
+    margin-top: 0.6rem;
+    overflow-x: auto;
+    border-radius: 8px;
+    background: #020617;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: #e2e8f0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .help-note {
+    margin-top: 0.75rem;
+    border-radius: 8px;
+    border: 1px solid #fef3c7;
+    background: #fffbeb;
+    padding: 8px 12px;
+    color: #92400e !important;
+  }
+  .help-table {
+    margin-top: 0.5rem;
+    overflow-x: auto;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+  }
+  .help-table table { width: 100%; font-size: 12.5px; }
+  .help-table th {
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+  }
+  .help-table td {
+    border-bottom: 1px solid #f1f5f9;
+    padding: 8px 10px;
+    vertical-align: top;
+    color: #475569;
+  }
+  .help-table tr:last-child td { border-bottom: 0; }
+</style>
+
+<script>
+  import {
+    confirmAction, currentHost, escapeHtml, formatBytes, formatDuration, formatRelative,
+    ICON, onView, serverPlatform, spinner, svg, toast,
+  } from '../lib/client';
+  import {
+    CONDITION_LABELS, PipelineRun, STEP_TYPES, TEMPLATES,
+    conditionText, exportPipeline, findUnknownVariables, importPipelines, loadPipelines,
+    newStep, recordRun, savePipelines, stepSummary, storageBytes, uid, usesSudo,
+    type ConditionCheck, type Pipeline, type RunRecord, type RunStatus, type Step, type StepResult, type StepStatus, type StepType,
+  } from '../lib/pipelines';
+
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+
+  let pipelines: Pipeline[] = loadPipelines();
+  let editingId: string | null = null;
+  let selectedStepId: string | null = null;
+  let panelTab: 'step' | 'vars' | 'runs' = 'step';
+  let activeRun: { pipelineId: string; run: PipelineRun } | null = null;
+  let shownRun: RunRecord | null = null;
+  let insertAt = 0;
+  const expanded = new Set<string>();
+
+  const editing = () => pipelines.find((p) => p.id === editingId) || null;
+  const isRunning = (id?: string | null) => !!activeRun && (!id || activeRun.pipelineId === id);
+
+  // ---------- Penyimpanan ----------
+  let saveTimer: number | undefined;
+  function persist(immediate = false) {
+    const p = editing();
+    if (p) p.updatedAt = Date.now();
+    window.clearTimeout(saveTimer);
+    const write = () => {
+      if (!savePipelines(pipelines)) toast('Penyimpanan browser penuh. Hapus riwayat run atau pipeline lama.', 'error');
+      const saved = $('pl-saved');
+      if (saved) saved.textContent = 'Tersimpan di browser';
+    };
+    if (immediate) write();
+    else {
+      $('pl-saved').textContent = 'Menyimpan…';
+      saveTimer = window.setTimeout(write, 300);
+    }
+  }
+
+  function download(filename: string, data: unknown) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pipeline';
+
+  // ---------- Lencana status ----------
+  const RUN_BADGE: Record<RunStatus, [string, string]> = {
+    running: ['badge-brand', 'Berjalan'],
+    success: ['badge-green', 'Berhasil'],
+    failed: ['badge-red', 'Gagal'],
+    stopped: ['badge-amber', 'Berhenti'],
+    cancelled: ['badge-slate', 'Dibatalkan'],
+  };
+
+  function runBadge(status?: RunStatus) {
+    if (!status) return '<span class="badge badge-slate">Belum dijalankan</span>';
+    const [cls, label] = RUN_BADGE[status];
+    const dot = status === 'running' ? spinner('size-2.5') : '<span class="size-1.5 rounded-full bg-current opacity-70"></span>';
+    return `<span class="badge ${cls}">${dot}${label}</span>`;
+  }
+
+  const STEP_STATUS: Record<StepStatus, { icon: string; cls: string; label: string }> = {
+    pending: { icon: '', cls: 'text-slate-400', label: 'Menunggu' },
+    running: { icon: '', cls: 'text-brand-700', label: 'Berjalan…' },
+    success: { icon: ICON.check, cls: 'text-emerald-700', label: 'Berhasil' },
+    failed: { icon: ICON.x, cls: 'text-red-700', label: 'Gagal' },
+    stopped: { icon: ICON.pause, cls: 'text-amber-700', label: 'Berhenti' },
+    skipped: { icon: ICON.minus, cls: 'text-slate-400', label: 'Dilewati' },
+    cancelled: { icon: ICON.stop, cls: 'text-slate-500', label: 'Dibatalkan' },
+  };
+
+  function statusLine(result: StepResult) {
+    const s = STEP_STATUS[result.status];
+    const icon = result.status === 'running' ? spinner('size-3.5') : s.icon ? svg(s.icon, 'size-3.5', 2.4) : '';
+    const text = result.message || s.label;
+    const duration = result.durationMs !== undefined ? `<span class="text-slate-400">· ${formatDuration(result.durationMs)}</span>` : '';
+    const hasOutput = Boolean(result.stdout || result.stderr);
+    const toggle = hasOutput
+      ? `<button type="button" data-output="${result.stepId}" class="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">${svg(ICON.output, 'size-3.5')}${expanded.has(result.stepId) ? 'Sembunyikan' : 'Output'}</button>`
+      : '';
+    return `<div class="mt-2 flex items-center gap-1.5 border-t border-slate-100 pt-2 text-[12px] font-medium ${s.cls}">${icon}<span class="truncate">${escapeHtml(text)}</span>${duration}${toggle}</div>`;
+  }
+
+  // ---------- Daftar ----------
+  function miniChain(p: Pipeline) {
+    const shown = p.steps.slice(0, 8);
+    const chips = shown
+      .map((s) => {
+        const t = STEP_TYPES[s.type];
+        return `<span title="${escapeHtml(s.name)}" class="inline-flex size-6 items-center justify-center rounded-md ${t.tone} ${s.enabled ? '' : 'opacity-40'}">${svg((ICON as any)[t.icon], 'size-3.5')}</span>`;
+      })
+      .join(`<span class="h-px w-2 bg-slate-300"></span>`);
+    const more = p.steps.length > shown.length ? `<span class="ml-1 text-[11.5px] text-slate-400">+${p.steps.length - shown.length}</span>` : '';
+    return chips + more;
+  }
+
+  function renderList() {
+    const grid = $('pl-grid');
+    const size = storageBytes();
+    $('pl-storage-size').textContent = size ? ` Terpakai ${formatBytes(size)}.` : '';
+
+    if (!pipelines.length) {
+      grid.innerHTML = `
+        <div class="card col-span-full flex flex-col items-center px-6 py-14 text-center">
+          <span class="mb-3 inline-flex size-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">${svg(ICON.zap, 'size-6')}</span>
+          <p class="text-[15px] font-semibold text-slate-900">Belum ada pipeline</p>
+          <p class="mt-1 max-w-sm text-[13px] text-slate-500">Buat rangkaian langkah seperti perpanjang sertifikat SSL, deploy, atau bersihkan disk, lalu jalankan dengan satu klik.</p>
+          <button type="button" data-action="new" class="btn-primary mt-5">${svg(ICON.plus, 'size-4', 2.2)}Pipeline baru</button>
+        </div>`;
+      return;
+    }
+
+    const sorted = [...pipelines].sort((a, b) => b.updatedAt - a.updatedAt);
+    grid.innerHTML = sorted
+      .map((p) => {
+        const last = p.runs[0];
+        const status = isRunning(p.id) ? 'running' : last?.status;
+        const meta = [`${p.steps.length} langkah`, last ? `run ${formatRelative(last.startedAt)}` : ''].filter(Boolean).join(' · ');
+        return `
+          <article data-id="${p.id}" class="card group flex cursor-pointer flex-col p-4 transition hover:border-brand-300 hover:shadow-[0_4px_16px_-8px_rgba(15,23,42,0.18)]">
+            <div class="flex items-start justify-between gap-3">
+              <button type="button" data-action="open" class="min-w-0 text-left">
+                <p class="truncate text-[14px] font-semibold text-slate-900 group-hover:text-brand-700">${escapeHtml(p.name)}</p>
+                <p class="mt-0.5 line-clamp-2 text-[12.5px] text-slate-500">${escapeHtml(p.description) || '<span class="text-slate-400">Tanpa deskripsi</span>'}</p>
+              </button>
+              ${runBadge(status)}
+            </div>
+            <div class="mt-4 flex flex-wrap items-center">${miniChain(p)}</div>
+            <div class="mt-4 flex items-center gap-1 border-t border-slate-100 pt-3">
+              <span class="truncate text-[12px] text-slate-400">${meta}</span>
+              <div class="ml-auto flex shrink-0 items-center gap-0.5">
+                <button type="button" data-action="duplicate" class="icon-btn" title="Duplikat" aria-label="Duplikat">${svg(ICON.copy)}</button>
+                <button type="button" data-action="export" class="icon-btn" title="Ekspor JSON" aria-label="Ekspor JSON">${svg(ICON.download)}</button>
+                <button type="button" data-action="delete" class="icon-btn hover:bg-red-50 hover:text-red-600" title="Hapus" aria-label="Hapus">${svg(ICON.trash)}</button>
+                <button type="button" data-action="run" class="btn-secondary ml-1 h-8 px-3" ${isRunning() ? 'disabled' : ''}>${svg(ICON.play, 'size-3.5')}Run</button>
+              </div>
+            </div>
+          </article>`;
+      })
+      .join('');
+  }
+
+  $('pl-grid').addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    const btn = target.closest<HTMLElement>('[data-action]');
+    // Klik di mana pun pada kartu (selain tombol aksinya) membuka editor.
+    const card = target.closest<HTMLElement>('article[data-id]');
+    if (!btn && !card) return;
+    const action = btn?.dataset.action ?? 'open';
+    if (action === 'new') return openTemplates();
+
+    const id = (btn ?? card)!.closest<HTMLElement>('[data-id]')?.dataset.id;
+    const p = pipelines.find((x) => x.id === id);
+    if (!p) return;
+
+    if (action === 'open') openEditor(p.id);
+    if (action === 'run') {
+      openEditor(p.id);
+      runPipeline(p);
+    }
+    if (action === 'duplicate') {
+      const copy: Pipeline = { ...structuredClone(p), id: uid(), name: `${p.name} (salinan)`, runs: [], createdAt: Date.now(), updatedAt: Date.now() };
+      copy.steps.forEach((s) => (s.id = uid()));
+      pipelines.push(copy);
+      persist(true);
+      renderList();
+      toast('Pipeline diduplikat', 'success');
+    }
+    if (action === 'export') download(`pipeline-${slug(p.name)}.json`, exportPipeline(p));
+    if (action === 'delete') deletePipeline(p);
+  });
+
+  async function deletePipeline(p: Pipeline) {
+    if (isRunning(p.id)) return toast('Hentikan run terlebih dahulu', 'error');
+    const ok = await confirmAction({ title: `Hapus '${p.name}'?`, message: 'Pipeline dan riwayat run-nya dihapus dari browser ini.', okText: 'Hapus' });
+    if (!ok) return;
+    pipelines = pipelines.filter((x) => x.id !== p.id);
+    persist(true);
+    if (editingId === p.id) closeEditor();
+    renderList();
+    toast('Pipeline dihapus', 'info');
+  }
+
+  // ---------- Template & import ----------
+  const templateDialog = $('pl-template-dialog');
+  const stepDialog = $('pl-step-dialog');
+  const openDialog = (el: HTMLElement) => { el.classList.remove('hidden'); el.classList.add('flex'); };
+  const closeDialog = (el: HTMLElement) => { el.classList.add('hidden'); el.classList.remove('flex'); };
+
+  const helpDialog = $('pl-help-dialog');
+  const runDialog = $('pl-run-dialog');
+
+  [templateDialog, stepDialog].forEach((dialog) => {
+    dialog.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (target === dialog || target.closest('[data-close]')) closeDialog(dialog);
+    });
+  });
+
+  // ---------- Petunjuk ----------
+  document.querySelector('[data-view-panel="pipelines"]')!.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('[data-help]')) {
+      openDialog(helpDialog);
+      $('pl-help-body').scrollTop = 0;
+    }
+  });
+  helpDialog.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (target === helpDialog || target.closest('[data-help-close]')) return closeDialog(helpDialog);
+
+    // Daftar isi: gulir di dalam dialog tanpa mengubah hash halaman (hash dipakai navigasi view).
+    const link = target.closest<HTMLAnchorElement>('#pl-help-toc a');
+    if (link) {
+      e.preventDefault();
+      const body = $('pl-help-body');
+      const section = document.getElementById(link.getAttribute('href')!.slice(1));
+      if (section) {
+        const top = section.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 12;
+        body.scrollTo({ top });
+      }
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    [templateDialog, stepDialog, helpDialog].forEach(closeDialog);
+    if (!runDialog.classList.contains('hidden')) resolveRunDialog?.(null);
+  });
+
+  // ---------- Dialog run ----------
+  let resolveRunDialog: ((value: { sudoPassword?: string } | null) => void) | null = null;
+
+  function askToRun(p: Pipeline, host: string): Promise<{ sudoPassword?: string } | null> {
+    const enabled = p.steps.filter((s) => s.enabled);
+    const needsSudo = serverPlatform().platform === 'unix' && usesSudo(p);
+    const password = $<HTMLInputElement>('pl-sudo-password');
+
+    $('pl-run-title').textContent = `Jalankan '${p.name}'?`;
+    $('pl-run-subtitle').innerHTML = `${enabled.length} langkah dijalankan berurutan di <span class="font-mono text-slate-700">${escapeHtml(host || 'server ini')}</span>.`;
+    $('pl-run-steps').innerHTML = enabled
+      .map((s, i) => {
+        const t = STEP_TYPES[s.type];
+        return `<li class="flex items-center gap-2"><span class="w-4 text-right text-[11px] font-semibold text-slate-400">${i + 1}</span>
+          <span class="inline-flex size-5 shrink-0 items-center justify-center rounded ${t.tone}">${svg((ICON as any)[t.icon], 'size-3')}</span>
+          <span class="truncate">${escapeHtml(s.name || t.label)}</span></li>`;
+      })
+      .join('');
+    $('pl-run-sudo').classList.toggle('hidden', !needsSudo);
+    password.value = '';
+    openDialog(runDialog);
+    (needsSudo ? password : runDialog.querySelector<HTMLButtonElement>('button[type="submit"]'))?.focus();
+
+    return new Promise((resolve) => {
+      resolveRunDialog = (value) => {
+        resolveRunDialog = null;
+        password.value = '';
+        closeDialog(runDialog);
+        resolve(value);
+      };
+    });
+  }
+
+  $('pl-run-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const password = $<HTMLInputElement>('pl-sudo-password').value;
+    resolveRunDialog?.({ sudoPassword: password || undefined });
+  });
+  runDialog.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (target === runDialog || target.closest('[data-run-cancel]')) resolveRunDialog?.(null);
+  });
+
+  function openTemplates() {
+    $('pl-template-list').innerHTML = TEMPLATES.map(
+      (t) => `
+        <button type="button" data-template="${t.id}" class="flex w-full items-start gap-3 rounded-lg border border-slate-200 p-3 text-left transition hover:border-brand-500 hover:bg-brand-50/50">
+          <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg ${t.id === 'blank' ? 'bg-slate-100 text-slate-500' : 'bg-brand-50 text-brand-700'}">${svg(t.id === 'blank' ? ICON.plus : ICON.zap)}</span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-[13px] font-semibold text-slate-900">${escapeHtml(t.name)}</span>
+            <span class="mt-0.5 block text-[12.5px] text-slate-500">${escapeHtml(t.description)}</span>
+          </span>
+          ${t.id === 'blank' ? '' : '<span class="badge badge-slate shrink-0">Linux</span>'}
+        </button>`,
+    ).join('');
+    openDialog(templateDialog);
+  }
+
+  $('pl-template-list').addEventListener('click', (e) => {
+    const id = (e.target as HTMLElement).closest<HTMLElement>('[data-template]')?.dataset.template;
+    const template = TEMPLATES.find((t) => t.id === id);
+    if (!template) return;
+    const p = template.create();
+    pipelines.push(p);
+    persist(true);
+    closeDialog(templateDialog);
+    openEditor(p.id);
+    selectedStepId = p.steps[0]?.id || null;
+    panelTab = template.id === 'blank' ? 'step' : 'vars';
+    renderEditor();
+  });
+
+  $('pl-new').addEventListener('click', openTemplates);
+  $('pl-export-all').addEventListener('click', () => {
+    if (!pipelines.length) return toast('Belum ada pipeline untuk diekspor', 'info');
+    download(`serverdeck-pipelines-${new Date().toISOString().slice(0, 10)}.json`, {
+      format: 'serverdeck-pipelines',
+      version: 1,
+      pipelines: pipelines.map((p) => exportPipeline(p).pipeline),
+    });
+  });
+
+  $<HTMLInputElement>('pl-import-input').addEventListener('change', async (e) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const imported = importPipelines(await file.text());
+      if (!imported.length) throw new Error('Tidak ada pipeline di file ini');
+      pipelines.push(...imported);
+      persist(true);
+      renderList();
+      toast(`${imported.length} pipeline diimpor`, 'success');
+    } catch (err: any) {
+      toast(`Import gagal: ${err.message}`, 'error');
+    }
+  });
+
+  // ---------- Editor ----------
+  function openEditor(id: string) {
+    const p = pipelines.find((x) => x.id === id);
+    if (!p) return;
+    if (editingId !== id) {
+      editingId = id;
+      selectedStepId = p.steps[0]?.id || null;
+      shownRun = isRunning(id) ? activeRun!.run.record : p.runs[0] || null;
+      expanded.clear();
+      panelTab = 'step';
+    }
+    $<HTMLInputElement>('pl-name').value = p.name;
+    $<HTMLInputElement>('pl-desc').value = p.description;
+    $('pl-saved').textContent = `Diubah ${formatRelative(p.updatedAt)}`;
+    $('pl-list-screen').classList.add('hidden');
+    $('pl-editor-screen').classList.remove('hidden');
+    window.scrollTo({ top: 0 });
+    renderEditor();
+  }
+
+  function closeEditor() {
+    editingId = null;
+    $('pl-editor-screen').classList.add('hidden');
+    $('pl-list-screen').classList.remove('hidden');
+    renderList();
+  }
+
+  $('pl-back').addEventListener('click', closeEditor);
+  $('pl-name').addEventListener('input', (e) => {
+    const p = editing();
+    if (p) { p.name = (e.target as HTMLInputElement).value; persist(); }
+  });
+  $('pl-desc').addEventListener('input', (e) => {
+    const p = editing();
+    if (p) { p.description = (e.target as HTMLInputElement).value; persist(); }
+  });
+  $('pl-export').addEventListener('click', () => {
+    const p = editing();
+    if (p) download(`pipeline-${slug(p.name)}.json`, exportPipeline(p));
+  });
+  $('pl-delete').addEventListener('click', () => {
+    const p = editing();
+    if (p) deletePipeline(p);
+  });
+  $('pl-run').addEventListener('click', () => {
+    const p = editing();
+    if (!p) return;
+    if (isRunning(p.id)) {
+      activeRun!.run.cancel();
+      toast('Menghentikan setelah langkah yang sedang berjalan…', 'info');
+    } else {
+      runPipeline(p);
+    }
+  });
+
+  function renderEditor() {
+    renderRunButton();
+    renderFlow();
+    renderPanel();
+  }
+
+  function renderRunButton() {
+    const p = editing();
+    const btn = $<HTMLButtonElement>('pl-run');
+    if (!p) return;
+    if (isRunning(p.id)) {
+      btn.className = 'btn-danger';
+      btn.innerHTML = `${svg(ICON.stop, 'size-3.5', 2.2)}Hentikan`;
+      btn.disabled = false;
+    } else {
+      btn.className = 'btn-primary';
+      btn.innerHTML = `${svg(ICON.play, 'size-3.5', 2.2)}Jalankan`;
+      btn.disabled = isRunning() || !p.steps.length;
+    }
+  }
+
+  // ---------- Alur (kanvas) ----------
+  function connector(index: number, active: boolean) {
+    const line = active ? 'bg-brand-400' : 'bg-slate-300';
+    return `
+      <div class="flex flex-col items-center">
+        <span class="h-4 w-0.5 ${line}"></span>
+        <button type="button" data-insert="${index}" title="Tambah langkah di sini" aria-label="Tambah langkah di sini"
+          class="inline-flex size-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-400 transition hover:border-brand-500 hover:bg-brand-50 hover:text-brand-600">
+          ${svg(ICON.plus, 'size-3.5', 2.2)}
+        </button>
+        <span class="h-4 w-0.5 ${line}"></span>
+      </div>`;
+  }
+
+  function nodeActions(i: number, total: number) {
+    const b = (action: string, icon: string, title: string, disabled = false, danger = false) =>
+      `<button type="button" data-step-action="${action}" data-index="${i}" title="${title}" aria-label="${title}" ${disabled ? 'disabled' : ''}
+        class="icon-btn size-7 ${danger ? 'hover:bg-red-50 hover:text-red-600' : ''}">${svg(icon, 'size-3.5')}</button>`;
+    return b('up', ICON.up, 'Naikkan', i === 0) + b('down', ICON.down, 'Turunkan', i === total - 1) + b('duplicate', ICON.copy, 'Duplikat') + b('delete', ICON.trash, 'Hapus', false, true);
+  }
+
+  function renderFlow() {
+    const p = editing();
+    if (!p) return;
+    const results = new Map((shownRun?.steps || []).map((r) => [r.stepId, r]));
+    const host = currentHost();
+
+    let html = `
+      <div class="mx-auto flex items-center gap-2.5 rounded-full border border-slate-200 bg-white px-4 py-2">
+        <span class="inline-flex size-6 items-center justify-center rounded-full bg-brand-600 text-white">${svg(ICON.zap, 'size-3.5', 2.2)}</span>
+        <span class="text-[13px] font-semibold text-slate-900">Manual trigger</span>
+        ${host ? `<span class="font-mono text-[12px] text-slate-400">${escapeHtml(host)}</span>` : ''}
+      </div>`;
+
+    // Garis penghubung menyala sampai langkah terakhir yang dijangkau run.
+    const reached = (r?: StepResult) => Boolean(r && ['running', 'success', 'failed', 'stopped'].includes(r.status));
+    p.steps.forEach((step, i) => {
+      const t = STEP_TYPES[step.type];
+      const result = results.get(step.id);
+      const selected = step.id === selectedStepId;
+      const showStatus = result && (result.status !== 'pending' || shownRun?.status === 'running');
+
+      html += connector(i, reached(result));
+      html += `
+        <div class="group">
+          <div data-select="${step.id}" class="card cursor-pointer p-3.5 transition ${selected ? 'border-brand-500 ring-2 ring-brand-100' : 'hover:border-slate-300'}">
+            <div class="flex items-start gap-3 ${step.enabled ? '' : 'opacity-50'}">
+              <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg ${t.tone}">${svg((ICON as any)[t.icon], 'size-[17px]')}</span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-semibold text-slate-400">${i + 1}</span>
+                  <p class="truncate text-[13.5px] font-semibold text-slate-900">${escapeHtml(step.name || t.label)}</p>
+                  ${step.enabled ? '' : '<span class="badge badge-slate">Nonaktif</span>'}
+                  ${step.onError === 'continue' && step.type !== 'wait' ? '<span class="badge badge-slate" title="Bila gagal, lanjut ke langkah berikutnya">Lanjut bila gagal</span>' : ''}
+                </div>
+                <p class="mt-0.5 truncate font-mono text-[12px] text-slate-500">${escapeHtml(stepSummary(step)) || '<span class="font-sans text-slate-400">Belum dikonfigurasi</span>'}</p>
+                ${step.type === 'condition' ? `<p class="mt-1.5 text-[12px] text-violet-700">Lanjut jika ${escapeHtml(conditionText(step))}<span class="text-slate-400"> · selain itu berhenti</span></p>` : ''}
+              </div>
+              <div class="-mr-1 -mt-1 flex shrink-0 items-center transition ${selected ? '' : 'lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100'}">
+                ${nodeActions(i, p.steps.length)}
+              </div>
+            </div>
+            ${showStatus ? statusLine(result!) : ''}
+          </div>
+          ${result && expanded.has(step.id) && (result.stdout || result.stderr) ? `
+            <pre class="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-950 p-3 font-mono text-[11.5px] leading-relaxed text-slate-200">${escapeHtml(result.stdout || '')}${result.stderr ? `<span class="text-red-400">${escapeHtml(result.stderr)}</span>` : ''}</pre>` : ''}
+        </div>`;
+    });
+
+    html += connector(p.steps.length, shownRun?.status === 'success');
+    const endBadge = shownRun ? runBadge(shownRun.status) : '';
+    const endMeta = shownRun?.finishedAt ? `<span class="text-[12px] text-slate-400">${formatDuration(shownRun.finishedAt - shownRun.startedAt)}</span>` : '';
+    html += `
+      <div class="mx-auto flex items-center gap-2.5 rounded-full border border-slate-200 bg-white px-4 py-2">
+        <span class="inline-flex size-6 items-center justify-center rounded-full bg-slate-100 text-slate-500">${svg(ICON.flag, 'size-3.5')}</span>
+        <span class="text-[13px] font-semibold text-slate-900">Selesai</span>
+        ${endBadge}${endMeta}
+      </div>`;
+
+    if (shownRun && shownRun !== activeRun?.run.record && shownRun !== p.runs[0]) {
+      html = `<p class="mb-4 text-center text-[12px] text-slate-500">Menampilkan run ${formatRelative(shownRun.startedAt)} · <button type="button" data-latest class="font-medium text-brand-700 hover:underline">kembali ke terbaru</button></p>` + html;
+    }
+
+    $('pl-flow').innerHTML = html;
+  }
+
+  $('pl-flow').addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    const p = editing();
+    if (!p) return;
+
+    const insert = target.closest<HTMLElement>('[data-insert]');
+    if (insert) {
+      insertAt = Number(insert.dataset.insert);
+      openStepTypes();
+      return;
+    }
+
+    const output = target.closest<HTMLElement>('[data-output]');
+    if (output) {
+      const id = output.dataset.output!;
+      expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+      renderFlow();
+      return;
+    }
+
+    if (target.closest('[data-latest]')) {
+      shownRun = p.runs[0] || null;
+      renderFlow();
+      renderPanel();
+      return;
+    }
+
+    const actionBtn = target.closest<HTMLElement>('[data-step-action]');
+    if (actionBtn) {
+      const i = Number(actionBtn.dataset.index);
+      const action = actionBtn.dataset.stepAction;
+      if (action === 'up' && i > 0) [p.steps[i - 1], p.steps[i]] = [p.steps[i], p.steps[i - 1]];
+      if (action === 'down' && i < p.steps.length - 1) [p.steps[i + 1], p.steps[i]] = [p.steps[i], p.steps[i + 1]];
+      if (action === 'duplicate') {
+        const copy = { ...structuredClone(p.steps[i]), id: uid(), name: `${p.steps[i].name} (salinan)` };
+        p.steps.splice(i + 1, 0, copy);
+        selectedStepId = copy.id;
+      }
+      if (action === 'delete') {
+        const [removed] = p.steps.splice(i, 1);
+        if (removed.id === selectedStepId) selectedStepId = p.steps[Math.min(i, p.steps.length - 1)]?.id || null;
+      }
+      persist(true);
+      renderEditor();
+      return;
+    }
+
+    const node = target.closest<HTMLElement>('[data-select]');
+    if (node) {
+      selectedStepId = node.dataset.select!;
+      panelTab = 'step';
+      renderFlow();
+      renderPanel();
+    }
+  });
+
+  function openStepTypes() {
+    $('pl-step-types').innerHTML = (Object.keys(STEP_TYPES) as StepType[])
+      .map((type) => {
+        const t = STEP_TYPES[type];
+        return `
+          <button type="button" data-type="${type}" class="flex items-start gap-3 rounded-lg border border-slate-200 p-3 text-left transition hover:border-brand-500 hover:bg-brand-50/50">
+            <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg ${t.tone}">${svg((ICON as any)[t.icon], 'size-[17px]')}</span>
+            <span class="min-w-0">
+              <span class="block text-[13px] font-semibold text-slate-900">${t.label}</span>
+              <span class="mt-0.5 block text-[12px] leading-snug text-slate-500">${t.description}</span>
+            </span>
+          </button>`;
+      })
+      .join('');
+    openDialog(stepDialog);
+  }
+
+  $('pl-step-types').addEventListener('click', (e) => {
+    const type = (e.target as HTMLElement).closest<HTMLElement>('[data-type]')?.dataset.type as StepType | undefined;
+    const p = editing();
+    if (!type || !p) return;
+    const step = newStep(type);
+    p.steps.splice(insertAt, 0, step);
+    selectedStepId = step.id;
+    panelTab = 'step';
+    persist(true);
+    closeDialog(stepDialog);
+    renderEditor();
+    (document.querySelector('#pl-panel [data-field="name"]') as HTMLInputElement | null)?.select();
+  });
+
+  // ---------- Panel ----------
+  $('pl-tabs').addEventListener('click', (e) => {
+    const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]')?.dataset.tab as typeof panelTab | undefined;
+    if (!tab) return;
+    panelTab = tab;
+    renderPanel();
+  });
+
+  const field = (label: string, control: string, hint = '') =>
+    `<div><label class="field-label">${label}</label>${control}${hint ? `<p class="mt-1 text-[11.5px] text-slate-400">${hint}</p>` : ''}</div>`;
+  const input = (attr: string, value: unknown, extra = '', type = 'text') =>
+    `<input type="${type}" ${attr} value="${escapeHtml(value)}" class="field-input ${extra}" />`;
+  const textarea = (attr: string, value: unknown, rows = 5) =>
+    `<textarea ${attr} rows="${rows}" spellcheck="false" class="field-input h-auto resize-y py-2 font-mono text-[12px] leading-relaxed">${escapeHtml(value)}</textarea>`;
+
+  function stepForm(step: Step) {
+    const c = step.config;
+    const t = STEP_TYPES[step.type];
+    const parts: string[] = [];
+
+    parts.push(`
+      <div class="flex items-center gap-2.5">
+        <span class="inline-flex size-8 items-center justify-center rounded-lg ${t.tone}">${svg((ICON as any)[t.icon], 'size-4')}</span>
+        <div class="min-w-0">
+          <p class="text-[13px] font-semibold text-slate-900">${t.label}</p>
+          <p class="text-[11.5px] leading-snug text-slate-500">${t.description}</p>
+        </div>
+      </div>`);
+    parts.push(field('Nama langkah', input('data-field="name"', step.name)));
+
+    if (step.type === 'command') {
+      parts.push(field('Perintah', textarea('data-cfg="command" placeholder="systemctl restart nginx"', c.command, 6), 'Dijalankan dengan shell non-interaktif. Perintah yang menunggu input (mis. sudo) akan timeout.'));
+      parts.push(field('Folder kerja', input('data-cfg="cwd" placeholder="/var/www/app (opsional)"', c.cwd, 'font-mono')));
+    }
+    if (step.type === 'condition') {
+      const needsValue = c.check === 'contains' || c.check === 'not_contains';
+      parts.push(field('Perintah pengecekan', textarea('data-cfg="command" placeholder="test -f /etc/nginx/nginx.conf"', c.command, 4)));
+      parts.push(field('Lanjut jika', `<select data-cfg="check" class="field-input">${(Object.keys(CONDITION_LABELS) as ConditionCheck[])
+        .map((k) => `<option value="${k}" ${c.check === k ? 'selected' : ''}>${CONDITION_LABELS[k]}</option>`).join('')}</select>`,
+        'Bila tidak terpenuhi, langkah berikutnya dilewati dan run berstatus "Berhenti", bukan "Gagal".'));
+      if (needsValue) parts.push(field('Teks yang dicari', input('data-cfg="value" placeholder="active"', c.value, 'font-mono')));
+    }
+    if (step.type === 'write_file') {
+      parts.push(field('Path file', input('data-cfg="path" placeholder="/etc/nginx/conf.d/app.conf"', c.path, 'font-mono')));
+      parts.push(field('Isi file', textarea('data-cfg="content"', c.content, 10), 'File yang sudah ada akan ditimpa.'));
+      parts.push(field('chmod', input('data-cfg="mode" placeholder="644 (opsional)"', c.mode, 'font-mono')));
+      parts.push(`
+        <label class="flex items-start gap-2 text-[12.5px] text-slate-600">
+          <input type="checkbox" data-cfg="sudo" ${c.sudo ? 'checked' : ''} class="mt-0.5 size-4 rounded accent-brand-600" />
+          <span>Tulis dengan sudo<span class="block text-[11.5px] text-slate-400">Untuk folder milik root seperti /etc/nginx. Hanya server Linux.</span></span>
+        </label>`);
+    }
+    if (step.type === 'http_check') {
+      parts.push(field('URL', input('data-cfg="url" placeholder="https://example.com/health"', c.url, 'font-mono'), 'Dipanggil dari server dengan curl, jadi alamat internal seperti 127.0.0.1 bisa dipakai.'));
+      parts.push(field('Status yang diharapkan', input('data-cfg="expectStatus" placeholder="200,301"', c.expectStatus, 'font-mono'), 'Pisahkan beberapa kode dengan koma.'));
+    }
+    if (step.type === 'wait') {
+      parts.push(field('Durasi (detik)', input('data-cfg="seconds" min="0" max="3600"', c.seconds, '', 'number')));
+    }
+
+    const advanced: string[] = [];
+    if (step.type !== 'wait') {
+      advanced.push(field('Jika gagal', `<select data-field="onError" class="field-input">
+        <option value="stop" ${step.onError === 'stop' ? 'selected' : ''}>Hentikan pipeline</option>
+        <option value="continue" ${step.onError === 'continue' ? 'selected' : ''}>Lanjutkan ke langkah berikutnya</option>
+      </select>`));
+    }
+    if (step.type !== 'wait' && step.type !== 'write_file') {
+      advanced.push(field('Timeout (detik)', input('data-field="timeoutSec" min="1" max="3600"', step.timeoutSec, '', 'number')));
+    }
+    advanced.push(`
+      <label class="flex items-center gap-2 text-[12.5px] text-slate-600">
+        <input type="checkbox" data-field="enabled" ${step.enabled ? 'checked' : ''} class="size-4 rounded accent-brand-600" />
+        Langkah aktif
+      </label>`);
+
+    parts.push(`<div class="space-y-4 border-t border-slate-100 pt-4">${advanced.join('')}</div>`);
+    parts.push(`
+      <div class="rounded-lg bg-slate-50 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-500">
+        Pakai <code class="font-mono text-slate-700">{{NAMA}}</code> untuk variabel pipeline dan
+        <code class="font-mono text-slate-700">{{PREV_OUTPUT}}</code> untuk output langkah sebelumnya.
+      </div>`);
+    return `<div class="space-y-4">${parts.join('')}</div>`;
+  }
+
+  function varsForm(p: Pipeline) {
+    const unknown = findUnknownVariables(p);
+    const rows = p.variables
+      .map((v, i) => `
+        <div class="flex items-center gap-2">
+          <input data-var-key="${i}" value="${escapeHtml(v.key)}" placeholder="NAMA" aria-label="Nama variabel" class="field-input w-[40%] font-mono text-[12px] uppercase" />
+          <input data-var-value="${i}" value="${escapeHtml(v.value)}" placeholder="nilai" aria-label="Nilai variabel" class="field-input font-mono text-[12px]" />
+          <button type="button" data-var-delete="${i}" class="icon-btn hover:bg-red-50 hover:text-red-600" title="Hapus variabel" aria-label="Hapus variabel">${svg(ICON.trash, 'size-3.5')}</button>
+        </div>`)
+      .join('');
+
+    return `
+      <div class="space-y-4">
+        <div>
+          <p class="text-[13px] font-semibold text-slate-900">Variabel</p>
+          <p class="mt-0.5 text-[12px] text-slate-500">Nilai yang dipakai ulang di banyak langkah, ditulis sebagai <code class="font-mono text-slate-700">{{NAMA}}</code>.</p>
+        </div>
+        ${unknown.length ? `<div class="flex gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">${svg(ICON.alert, 'size-4 shrink-0')}<span>Dipakai tapi belum didefinisikan: ${unknown.map((u) => `<code class="font-mono">${escapeHtml(u)}</code>`).join(', ')}</span></div>` : ''}
+        <div class="space-y-2">${rows || '<p class="text-[12.5px] text-slate-400">Belum ada variabel.</p>'}</div>
+        <button type="button" data-var-add class="btn-secondary h-8 w-full">${svg(ICON.plus, 'size-3.5', 2.2)}Tambah variabel</button>
+        <p class="text-[11.5px] text-slate-400">Variabel disimpan sebagai teks biasa di browser ini. Jangan isi password atau token.</p>
+      </div>`;
+  }
+
+  function runsList(p: Pipeline) {
+    const runs = isRunning(p.id) ? [activeRun!.run.record, ...p.runs] : p.runs;
+    if (!runs.length) {
+      return '<p class="py-6 text-center text-[12.5px] text-slate-400">Pipeline ini belum pernah dijalankan.</p>';
+    }
+    const items = runs
+      .map((r) => {
+        const done = r.steps.filter((s) => s.status === 'success').length;
+        const active = shownRun?.id === r.id;
+        const duration = r.finishedAt ? formatDuration(r.finishedAt - r.startedAt) : 'berjalan';
+        return `
+          <button type="button" data-run="${r.id}" class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${active ? 'bg-brand-50' : 'hover:bg-slate-50'}">
+            <div class="min-w-0 flex-1">
+              <p class="text-[12.5px] font-medium text-slate-800">${new Date(r.startedAt).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+              <p class="truncate text-[11.5px] text-slate-400">${done}/${r.steps.length} berhasil · ${duration}${r.host ? ` · <span class="font-mono">${escapeHtml(r.host)}</span>` : ''}</p>
+            </div>
+            ${runBadge(r.status)}
+          </button>`;
+      })
+      .join('');
+    return `
+      <div class="space-y-3">
+        <div class="-mx-1 space-y-0.5">${items}</div>
+        <div class="border-t border-slate-100 pt-3">
+          <button type="button" data-runs-clear class="btn-secondary h-8 w-full" ${isRunning(p.id) ? 'disabled' : ''}>Hapus riwayat</button>
+          <p class="mt-2 text-[11.5px] text-slate-400">Menyimpan ${p.runs.length} run terakhir, termasuk output, di browser ini.</p>
+        </div>
+      </div>`;
+  }
+
+  function renderPanel() {
+    const p = editing();
+    if (!p) return;
+    document.querySelectorAll<HTMLElement>('#pl-tabs [data-tab]').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === panelTab));
+    const panel = $('pl-panel');
+
+    if (panelTab === 'vars') panel.innerHTML = varsForm(p);
+    else if (panelTab === 'runs') panel.innerHTML = runsList(p);
+    else {
+      const step = p.steps.find((s) => s.id === selectedStepId);
+      panel.innerHTML = step
+        ? stepForm(step)
+        : `<div class="py-8 text-center">
+             <p class="text-[13px] font-medium text-slate-700">Pilih langkah untuk mengubahnya</p>
+             <p class="mt-1 text-[12px] text-slate-400">atau tekan tombol + di alur untuk menambah langkah.</p>
+           </div>`;
+    }
+  }
+
+  const panel = $('pl-panel');
+
+  function onPanelEdit(e: Event) {
+    const el = e.target as HTMLInputElement;
+    const p = editing();
+    if (!p) return;
+
+    if (el.dataset.varKey !== undefined) {
+      const clean = el.value.toUpperCase().replace(/[^A-Z0-9_]/g, '');
+      if (clean !== el.value) el.value = clean;
+      p.variables[Number(el.dataset.varKey)].key = clean;
+      persist();
+      renderFlow();
+      return;
+    }
+    if (el.dataset.varValue !== undefined) {
+      p.variables[Number(el.dataset.varValue)].value = el.value;
+      persist();
+      return;
+    }
+
+    const step = p.steps.find((s) => s.id === selectedStepId);
+    if (!step) return;
+    if (el.dataset.field) {
+      const key = el.dataset.field;
+      if (key === 'enabled') step.enabled = el.checked;
+      else if (key === 'timeoutSec') step.timeoutSec = Math.max(1, Math.min(3600, Number(el.value) || 300));
+      else if (key === 'onError') step.onError = el.value as Step['onError'];
+      else if (key === 'name') step.name = el.value;
+    }
+    if (el.dataset.cfg) {
+      const key = el.dataset.cfg as keyof Step['config'];
+      (step.config as any)[key] =
+        el.type === 'checkbox' ? el.checked : key === 'seconds' ? Math.max(0, Number(el.value) || 0) : el.value;
+      if (key === 'check' && e.type === 'change') renderPanel();
+    }
+    persist();
+    renderFlow();
+  }
+
+  panel.addEventListener('input', onPanelEdit);
+  panel.addEventListener('change', (e) => {
+    const el = e.target as HTMLElement;
+    if (el.tagName === 'SELECT' || (el as HTMLInputElement).type === 'checkbox') onPanelEdit(e);
+  });
+
+  panel.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    const p = editing();
+    if (!p) return;
+
+    if (target.closest('[data-var-add]')) {
+      p.variables.push({ key: '', value: '' });
+      persist(true);
+      renderPanel();
+      (panel.querySelector(`[data-var-key="${p.variables.length - 1}"]`) as HTMLInputElement | null)?.focus();
+      return;
+    }
+    const del = target.closest<HTMLElement>('[data-var-delete]');
+    if (del) {
+      p.variables.splice(Number(del.dataset.varDelete), 1);
+      persist(true);
+      renderPanel();
+      renderFlow();
+      return;
+    }
+    const runBtn = target.closest<HTMLElement>('[data-run]');
+    if (runBtn) {
+      const all = isRunning(p.id) ? [activeRun!.run.record, ...p.runs] : p.runs;
+      shownRun = all.find((r) => r.id === runBtn.dataset.run) || null;
+      expanded.clear();
+      shownRun?.steps.forEach((s) => s.status === 'failed' && expanded.add(s.stepId));
+      renderFlow();
+      renderPanel();
+      return;
+    }
+    if (target.closest('[data-runs-clear]')) {
+      const ok = await confirmAction({ title: 'Hapus riwayat run?', message: 'Semua output run pipeline ini dihapus dari browser.', okText: 'Hapus' });
+      if (!ok) return;
+      p.runs = [];
+      shownRun = null;
+      persist(true);
+      renderEditor();
+    }
+  });
+
+  // ---------- Run ----------
+  async function runPipeline(p: Pipeline) {
+    if (isRunning()) return toast('Masih ada pipeline yang berjalan', 'error');
+    const enabled = p.steps.filter((s) => s.enabled);
+    if (!enabled.length) return toast('Tidak ada langkah aktif', 'error');
+
+    const unknown = findUnknownVariables(p);
+    if (unknown.length) {
+      panelTab = 'vars';
+      renderPanel();
+      return toast(`Variabel belum didefinisikan: ${unknown.join(', ')}`, 'error');
+    }
+
+    const host = currentHost();
+    const answer = await askToRun(p, host);
+    if (!answer) return;
+
+    const run = new PipelineRun(p, { host, ...serverPlatform(), sudoPassword: answer.sudoPassword }, {
+      onUpdate(record) {
+        record.steps.forEach((s) => s.status === 'failed' && expanded.add(s.stepId));
+        if (editingId === p.id) {
+          renderFlow();
+          if (panelTab === 'runs') renderPanel();
+        }
+      },
+    });
+
+    activeRun = { pipelineId: p.id, run };
+    shownRun = run.record;
+    expanded.clear();
+    if (editingId === p.id) renderEditor();
+    renderList();
+
+    const record = await run.start();
+    activeRun = null;
+
+    // Pipeline bisa saja dihapus selama run berlangsung.
+    const target = pipelines.find((x) => x.id === p.id);
+    if (target) {
+      recordRun(target, record);
+      persist(true);
+    }
+    if (editingId === p.id) {
+      shownRun = record;
+      renderEditor();
+    }
+    renderList();
+
+    const [, label] = RUN_BADGE[record.status];
+    toast(`${p.name}: ${label}`, record.status === 'success' ? 'success' : record.status === 'failed' ? 'error' : 'info', 5000);
+  }
+
+  // ---------- Mulai ----------
+  onView('pipelines', () => {
+    if (editingId) renderEditor();
+    else renderList();
+  });
+
+  // Perubahan dari tab lain di browser yang sama.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== 'serverdeck.pipelines.v1' || isRunning()) return;
+    pipelines = loadPipelines();
+    if (editingId && !editing()) closeEditor();
+    else if (editingId) openEditor(editingId);
+    else renderList();
+  });
+</script>

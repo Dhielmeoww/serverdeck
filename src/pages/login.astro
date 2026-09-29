@@ -1,0 +1,103 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Icon from '../components/Icon.astro';
+import { loginMisconfigured } from '../lib/app-auth';
+
+export const prerender = false;
+
+const misconfigured = loginMisconfigured();
+---
+
+<Layout title="Masuk · ServerDeck">
+  <div class="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
+    <div class="w-full max-w-sm">
+      <div class="mb-8 text-center">
+        <span class="mx-auto mb-5 inline-flex size-12 items-center justify-center rounded-xl bg-brand-600 text-white">
+          <Icon name="lock" size={22} stroke={2} />
+        </span>
+        <h1 class="text-[22px] font-bold text-slate-900">Masuk ke ServerDeck</h1>
+        <p class="mt-1 text-[13px] text-slate-500">Login aplikasi dulu, setelah itu hubungkan server SSH.</p>
+      </div>
+
+      <form id="app-login-form" class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div id="app-login-error" class:list={['gap-2.5 rounded-lg border border-red-100 bg-red-50 px-3 py-2.5 text-[13px] text-red-700', misconfigured ? 'flex' : 'hidden']}>
+          {misconfigured && (
+            <span>
+              Login aktif (<code class="font-mono">SECURITY_ENABLELOGIN=true</code>) tetapi
+              <code class="font-mono">SECURITY_USERNAME</code> / <code class="font-mono">SECURITY_PASSWORD</code> belum diatur.
+              Isi di environment Docker lalu restart container.
+            </span>
+          )}
+        </div>
+
+        <div>
+          <label for="app-username" class="field-label">Username</label>
+          <input id="app-username" type="text" required autocomplete="username" class="field-input h-10 text-sm" disabled={misconfigured} />
+        </div>
+
+        <div>
+          <label for="app-password" class="field-label">Password</label>
+          <div class="relative">
+            <input id="app-password" type="password" required autocomplete="current-password" class="field-input h-10 pr-10 text-sm" disabled={misconfigured} />
+            <button type="button" id="app-toggle-password" aria-label="Tampilkan password" class="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 hover:text-slate-600">
+              <Icon name="eye" size={17} />
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" id="app-login-submit" class="btn-primary h-10 w-full text-sm" disabled={misconfigured}>
+          <span id="app-login-spinner" class="hidden size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+          <span id="app-login-text">Masuk</span>
+        </button>
+      </form>
+
+      <p class="mt-6 text-center text-[12px] leading-relaxed text-slate-400">
+        Setelah 5 percobaan gagal, login dikunci 5 menit.
+      </p>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  const form = document.getElementById('app-login-form') as HTMLFormElement;
+  const errorBox = document.getElementById('app-login-error')!;
+  const submit = document.getElementById('app-login-submit') as HTMLButtonElement;
+  const password = document.getElementById('app-password') as HTMLInputElement;
+
+  document.getElementById('app-toggle-password')!.addEventListener('click', () => {
+    password.type = password.type === 'password' ? 'text' : 'password';
+  });
+
+  (document.getElementById('app-username') as HTMLInputElement).focus();
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorBox.classList.add('hidden');
+    errorBox.classList.remove('flex');
+    submit.disabled = true;
+    document.getElementById('app-login-spinner')!.classList.remove('hidden');
+    document.getElementById('app-login-text')!.textContent = 'Memeriksa…';
+
+    try {
+      const res = await fetch('/api/app-auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: (document.getElementById('app-username') as HTMLInputElement).value,
+          password: password.value,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Login gagal');
+      location.replace('/');
+    } catch (err: any) {
+      password.value = '';
+      errorBox.textContent = err.message;
+      errorBox.classList.remove('hidden');
+      errorBox.classList.add('flex');
+      submit.disabled = false;
+      document.getElementById('app-login-spinner')!.classList.add('hidden');
+      document.getElementById('app-login-text')!.textContent = 'Masuk';
+    }
+  });
+</script>

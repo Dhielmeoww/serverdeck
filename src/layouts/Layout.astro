@@ -1,0 +1,107 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+}
+
+const { title = 'ServerDeck' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231B7A5C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 17 10 11 4 5'></polyline><line x1='12' y1='19' x2='20' y2='19'></line></svg>" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+  <body class="min-h-screen selection:bg-brand-100 selection:text-brand-900">
+    <slot />
+
+    <div id="toast-container"></div>
+
+    <!-- Dialog konfirmasi, pengganti confirm() bawaan browser. -->
+    <div id="confirm-dialog" class="dialog-backdrop">
+      <div class="dialog max-w-[380px] text-center">
+        <span id="confirm-icon" class="mx-auto mb-3 inline-flex size-12 items-center justify-center rounded-full bg-red-50 text-red-600">
+          <svg class="size-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
+        </span>
+        <p id="confirm-title" class="dialog-title">Are you sure?</p>
+        <p id="confirm-message" class="dialog-subtitle"></p>
+        <div class="mt-6 grid grid-cols-2 gap-2">
+          <button type="button" id="confirm-cancel" class="btn-secondary">Batal</button>
+          <button type="button" id="confirm-ok" class="btn-danger">Ya, lanjutkan</button>
+        </div>
+      </div>
+    </div>
+
+    <script is:inline>
+      const TOAST_TONE = {
+        success: ['bg-emerald-50 text-emerald-600', '<path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7"/>'],
+        error: ['bg-red-50 text-red-600', '<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>'],
+        info: ['bg-slate-100 text-slate-500', '<path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>'],
+      };
+
+      window.showToast = function (message, type = 'info', duration = 3500) {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+
+        const [tone, path] = TOAST_TONE[type] || TOAST_TONE.info;
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.innerHTML = `
+          <span class="inline-flex size-7 shrink-0 items-center justify-center rounded-full ${tone}">
+            <svg class="size-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">${path}</svg>
+          </span>
+          <span class="flex-1 leading-snug"></span>
+        `;
+        // Pesan bisa berisi nama file dari server: tulis sebagai teks, bukan HTML.
+        toast.lastElementChild.textContent = message;
+
+        container.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('show'));
+
+        setTimeout(() => {
+          toast.classList.remove('show');
+          setTimeout(() => toast.remove(), 250);
+        }, duration);
+      };
+
+      window.confirmDialog = function ({ title, message = '', okText = 'Ya, lanjutkan', danger = true }) {
+        const dialog = document.getElementById('confirm-dialog');
+        const ok = document.getElementById('confirm-ok');
+        const cancel = document.getElementById('confirm-cancel');
+        const icon = document.getElementById('confirm-icon');
+
+        document.getElementById('confirm-title').textContent = title;
+        document.getElementById('confirm-message').textContent = message;
+        ok.textContent = okText;
+        ok.className = danger ? 'btn-danger' : 'btn-primary';
+        icon.className = `mx-auto mb-3 inline-flex size-12 items-center justify-center rounded-full ${danger ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'}`;
+
+        dialog.classList.remove('hidden');
+        dialog.classList.add('flex');
+        ok.focus();
+
+        return new Promise((resolve) => {
+          const close = (value) => {
+            dialog.classList.add('hidden');
+            dialog.classList.remove('flex');
+            ok.onclick = cancel.onclick = dialog.onclick = null;
+            document.removeEventListener('keydown', onKey, true);
+            resolve(value);
+          };
+          const onKey = (e) => {
+            if (e.key === 'Escape') { e.stopPropagation(); close(false); }
+          };
+          ok.onclick = () => close(true);
+          cancel.onclick = () => close(false);
+          dialog.onclick = (e) => { if (e.target === dialog) close(false); };
+          document.addEventListener('keydown', onKey, true);
+        });
+      };
+    </script>
+  </body>
+</html>

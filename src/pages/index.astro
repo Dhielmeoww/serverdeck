@@ -1,0 +1,1393 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Icon from '../components/Icon.astro';
+import PipelinesView from '../components/PipelinesView.astro';
+import StorageView from '../components/StorageView.astro';
+import { SSHManager } from '../lib/ssh-session';
+import { getSessionId } from '../lib/auth-cookie';
+
+export const prerender = false;
+
+const sessionId = getSessionId(Astro);
+let initialUser = null;
+let initialSystem = null;
+
+if (sessionId) {
+  const session = SSHManager.getSession(sessionId);
+  if (session) {
+    initialUser = {
+      host: session.host,
+      port: session.port,
+      username: session.username,
+      connectedAt: session.connectedAt,
+    };
+    try {
+      initialSystem = await SSHManager.getSystemInfo(sessionId);
+    } catch {
+      initialSystem = { homeDir: '/' };
+    }
+  }
+}
+
+// Terisi hanya bila SECURITY_ENABLELOGIN=true (lihat middleware.ts).
+const appUser = Astro.locals.appUser;
+
+const userHost = initialUser ? `${initialUser.username}@${initialUser.host}` : '';
+
+const bookmarks = [
+  { path: '/', label: 'Root', icon: 'root' },
+  { path: '/home', label: 'User homes', icon: 'home' },
+  { path: '/var/www', label: 'Web root', icon: 'globe' },
+  { path: '/etc', label: 'Config', icon: 'settings' },
+  { path: '/var/log', label: 'System logs', icon: 'log' },
+  { path: '/tmp', label: 'Temporary', icon: 'box' },
+] as const;
+
+const views = [
+  { id: 'files', label: 'File Manager', icon: 'folder' },
+  { id: 'pipelines', label: 'Pipelines', icon: 'workflow' },
+  { id: 'storage', label: 'Storage', icon: 'hardDrive' },
+] as const;
+
+const quickCommands = [
+  { cmd: 'df -h', label: 'df -h' },
+  { cmd: 'free -m', label: 'free -m' },
+  { cmd: 'uname -a', label: 'uname -a' },
+  { cmd: 'docker ps 2>/dev/null || ps aux | head -n 10', label: 'docker ps' },
+];
+
+const permRows = [
+  { key: 'u', label: 'Owner' },
+  { key: 'g', label: 'Group' },
+  { key: 'o', label: 'Others' },
+];
+---
+
+<Layout title="ServerDeck">
+  <div
+    id="app-container"
+    data-authenticated={initialUser ? 'true' : 'false'}
+    data-initial-home={initialSystem?.homeDir || '/'}
+    data-platform={initialSystem?.platform || 'unix'}
+    data-shell={initialSystem?.shell || 'sh'}
+  >
+
+    <!-- ============ SIGN IN ============ -->
+    <div id="unauth-view" class:list={['min-h-screen items-center justify-center bg-slate-50 px-4 py-10', initialUser ? 'hidden' : 'flex']}>
+      <div class="w-full max-w-sm">
+        <div class="mb-8 text-center">
+          <span class="mx-auto mb-5 inline-flex size-12 items-center justify-center rounded-xl bg-brand-600 text-white">
+            <Icon name="terminal" size={24} stroke={2.2} />
+          </span>
+          <h1 class="text-[22px] font-bold text-slate-900">Sign in to ServerDeck</h1>
+          <p class="mt-1 text-[13px] text-slate-500">Kelola file, izin akses, dan terminal server remote lewat SSH.</p>
+        </div>
+
+        <form id="login-form" class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div id="login-error-msg" class="hidden gap-2.5 rounded-lg border border-red-100 bg-red-50 px-3 py-2.5 text-[13px] text-red-700"></div>
+
+          <div id="saved-presets-container" class="hidden">
+            <label for="saved-presets-select" class="field-label">Koneksi tersimpan</label>
+            <select id="saved-presets-select" class="field-input">
+              <option value="">Pilih koneksi tersimpan…</option>
+            </select>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3">
+            <div class="col-span-2">
+              <label for="input-host" class="field-label">Host / IP</label>
+              <input type="text" id="input-host" required autocomplete="off" placeholder="192.168.1.50" class="field-input font-mono" />
+            </div>
+            <div>
+              <label for="input-port" class="field-label">Port</label>
+              <input type="number" id="input-port" value="22" min="1" max="65535" class="field-input font-mono" />
+            </div>
+          </div>
+
+          <div>
+            <label for="input-username" class="field-label">Username</label>
+            <input type="text" id="input-username" required value="root" autocomplete="username" placeholder="root" class="field-input font-mono" />
+          </div>
+
+          <div>
+            <span class="field-label">Metode autentikasi</span>
+            <div class="segmented">
+              <button type="button" id="tab-auth-password" class="is-active">Password</button>
+              <button type="button" id="tab-auth-key">Private key</button>
+            </div>
+          </div>
+
+          <div id="field-password">
+            <label for="input-password" class="field-label">Password</label>
+            <div class="relative">
+              <input type="password" id="input-password" autocomplete="current-password" placeholder="Password SSH" class="field-input pr-10" />
+              <button type="button" id="btn-toggle-pwd" aria-label="Tampilkan password" class="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 hover:text-slate-600">
+                <Icon name="eye" size={17} />
+              </button>
+            </div>
+          </div>
+
+          <div id="field-private-key" class="hidden flex-col gap-4">
+            <div>
+              <label for="input-private-key" class="field-label">Private key (OpenSSH / PEM)</label>
+              <textarea id="input-private-key" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" class="field-input h-auto resize-none py-2 font-mono text-xs"></textarea>
+            </div>
+            <div>
+              <label for="input-passphrase" class="field-label">Passphrase <span class="font-normal text-slate-400">(opsional)</span></label>
+              <input type="password" id="input-passphrase" class="field-input" />
+            </div>
+          </div>
+
+          <label class="flex items-center gap-2 text-[12.5px] text-slate-500">
+            <input type="checkbox" id="checkbox-save-preset" class="size-4 rounded accent-brand-600" checked />
+            Simpan host ini ke riwayat koneksi
+          </label>
+
+          <button type="submit" id="btn-submit-login" class="btn-primary h-10 w-full text-sm">
+            <span id="login-spinner" class="hidden size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+            <span id="login-btn-text">Connect</span>
+          </button>
+        </form>
+
+        <p class="mt-6 text-center text-[12px] leading-relaxed text-slate-400">
+          Kredensial hanya dipakai untuk membuka sesi SSH dan tidak disimpan di server.
+        </p>
+        {appUser && (
+          <p class="mt-3 text-center text-[12px] text-slate-400">
+            Masuk sebagai <span class="font-medium text-slate-600">{appUser}</span> ·{' '}
+            <button type="button" class="app-logout-btn font-medium text-brand-700 hover:underline">Keluar aplikasi</button>
+          </p>
+        )}
+      </div>
+    </div>
+
+    <!-- ============ APP SHELL ============ -->
+    <div id="app-shell" class:list={['min-h-screen bg-white', !initialUser && 'hidden']}>
+      <div id="sidebar-backdrop" class="fixed inset-0 z-40 hidden bg-slate-900/30 backdrop-blur-sm lg:hidden"></div>
+
+      <aside id="app-sidebar" class="fixed inset-y-0 left-0 z-50 flex w-64 -translate-x-full flex-col border-r border-slate-200 bg-white transition-transform duration-200 lg:translate-x-0">
+        <div class="flex h-16 shrink-0 items-center gap-2.5 border-b border-slate-100 px-5">
+          <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
+            <Icon name="terminal" size={18} stroke={2.2} />
+          </span>
+          <div class="min-w-0">
+            <p class="text-[15px] font-bold leading-tight text-slate-900">ServerDeck</p>
+            <p class="truncate text-[11px] leading-tight text-slate-400">SSH File Manager</p>
+          </div>
+          <button type="button" id="btn-sidebar-close" class="icon-btn ml-auto lg:hidden" aria-label="Tutup menu">
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+
+        <nav class="no-scrollbar flex-1 space-y-0.5 overflow-y-auto px-3 py-4">
+          <p class="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Menu</p>
+          {views.map((v) => (
+            <a href={`#${v.id}`} class="view-link nav-item" data-view={v.id}>
+              <Icon name={v.icon} />
+              <span class="flex-1 truncate">{v.label}</span>
+            </a>
+          ))}
+
+          <p class="px-3 pb-2 pt-5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Lokasi</p>
+          {bookmarks.map((b) => (
+            <button type="button" class="quick-jump-btn nav-item" data-path={b.path}>
+              <Icon name={b.icon} />
+              <span class="flex-1 truncate">{b.label}</span>
+              <span class="font-mono text-[11px] text-slate-400">{b.path}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div id="sidebar-server-info" class="border-t border-slate-100 px-5 py-4">
+          <div class="flex items-center gap-2.5">
+            <span class="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+              <Icon name="server" size={16} />
+            </span>
+            <div class="min-w-0">
+              <p id="sidebar-user-host" class="truncate font-mono text-[12px] font-semibold text-slate-800">{userHost}</p>
+              <p id="sidebar-os-info" class="truncate text-[11px] text-slate-400">{initialSystem?.uname || 'Linux'}</p>
+            </div>
+          </div>
+          {appUser && (
+            <div class="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3 text-[12px]">
+              <span class="truncate text-slate-400">Login: <span class="font-medium text-slate-600">{appUser}</span></span>
+              <button type="button" class="app-logout-btn shrink-0 font-medium text-slate-500 hover:text-red-600">Keluar aplikasi</button>
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <div class="lg:pl-64">
+        <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/85 px-4 backdrop-blur-md lg:px-8">
+          <button type="button" id="btn-sidebar-toggle" class="icon-btn size-9 lg:hidden" aria-label="Buka menu">
+            <Icon name="menu" size={20} />
+          </button>
+
+          <div class="min-w-0 flex-1">
+            <nav id="breadcrumb-container" class="no-scrollbar flex items-center gap-1.5 overflow-x-auto whitespace-nowrap text-[12px] text-slate-400"></nav>
+            <p id="header-title" class="truncate text-[15px] font-semibold text-slate-900">File Manager</p>
+          </div>
+
+          <span id="header-status-badge" class="badge badge-green hidden font-mono sm:inline-flex">
+            <span class="size-1.5 rounded-full bg-emerald-500"></span>
+            <span id="header-user-host">{userHost}</span>
+          </span>
+
+          <button type="button" id="btn-toggle-terminal" class="btn-secondary">
+            <Icon name="terminal" size={16} />
+            <span class="hidden sm:inline">Terminal</span>
+          </button>
+
+          <button type="button" id="btn-disconnect" class="icon-btn size-9 hover:bg-red-50 hover:text-red-600" title="Disconnect" aria-label="Disconnect">
+            <Icon name="logout" size={18} />
+          </button>
+        </header>
+
+        <main id="auth-view" class="px-4 py-6 pb-24 lg:px-8 lg:py-8">
+          <div class="mx-auto w-full max-w-[1400px]">
+            <section data-view-panel="files">
+            <!-- Page header -->
+            <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div class="min-w-0">
+                <h1 id="page-title" class="truncate text-[20px] font-bold tracking-tight text-slate-900">/</h1>
+                <p id="current-full-path" class="mt-0.5 truncate font-mono text-[12.5px] text-slate-500">/</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" id="btn-refresh" class="icon-btn size-9 border border-slate-200" title="Muat ulang" aria-label="Muat ulang">
+                  <Icon name="refresh" size={16} class="refresh-icon" />
+                </button>
+                <label class="btn-secondary cursor-pointer">
+                  <Icon name="upload" size={16} />
+                  Upload
+                  <input type="file" id="file-upload-input" class="hidden" multiple />
+                </label>
+                <button type="button" id="btn-new-folder" class="btn-secondary">
+                  <Icon name="folderPlus" size={16} />
+                  Folder
+                </button>
+                <button type="button" id="btn-new-file" class="btn-primary">
+                  <Icon name="plus" size={16} stroke={2.2} />
+                  File baru
+                </button>
+              </div>
+            </div>
+
+            <!-- Filter bar -->
+            <div class="mb-3 flex flex-wrap items-center gap-2">
+              <div class="relative w-full sm:w-72">
+                <Icon name="search" size={15} class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input type="text" id="search-filter-input" placeholder="Cari di folder ini…" class="field-input pl-9" />
+              </div>
+              <label class="ml-auto flex cursor-pointer items-center gap-2 text-[12.5px] text-slate-500">
+                <input type="checkbox" id="btn-toggle-hidden" class="size-4 rounded accent-brand-600" />
+                Tampilkan dotfiles
+              </label>
+            </div>
+
+            <!-- File table -->
+            <div id="file-dropzone" class="card relative overflow-hidden">
+              <div id="drag-overlay" class="absolute inset-0 z-30 hidden flex-col items-center justify-center rounded-xl border-2 border-dashed border-brand-400 bg-brand-50/90">
+                <Icon name="upload2" size={36} class="mb-2 text-brand-600" />
+                <p class="text-[14px] font-semibold text-brand-800">Lepaskan file untuk mengunggah</p>
+                <p id="drag-dest-path" class="mt-1 font-mono text-[12px] text-brand-700">/</p>
+              </div>
+
+              <div id="table-loading-spinner" class="absolute inset-0 z-20 hidden items-center justify-center bg-white/70">
+                <span class="size-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent"></span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-[13px]">
+                  <thead>
+                    <tr class="border-b border-slate-200 text-[11.5px] font-semibold uppercase tracking-wide text-slate-500">
+                      <th class="px-4 py-2.5">Nama</th>
+                      <th class="hidden w-28 px-4 py-2.5 sm:table-cell">Ukuran</th>
+                      <th class="hidden w-40 px-4 py-2.5 md:table-cell">Izin</th>
+                      <th class="hidden w-44 px-4 py-2.5 lg:table-cell">Diubah</th>
+                      <th class="w-36 px-4 py-2.5"><span class="sr-only">Aksi</span></th>
+                    </tr>
+                  </thead>
+                  <tbody id="file-list-tbody"></tbody>
+                </table>
+              </div>
+
+              <div class="flex items-center justify-between border-t border-slate-100 px-4 py-2.5 text-[12px] text-slate-500">
+                <span id="directory-summary">0 item</span>
+              </div>
+            </div>
+            </section>
+
+            <PipelinesView />
+            <StorageView />
+          </div>
+        </main>
+      </div>
+
+      <!-- ============ TERMINAL ============ -->
+      <div id="terminal-drawer" class="fixed bottom-0 left-0 right-0 z-40 flex h-80 translate-y-full flex-col border-t border-slate-800 bg-slate-950 transition-transform duration-300 sm:h-96 lg:left-64">
+        <div class="flex h-11 shrink-0 items-center gap-3 border-b border-slate-800 px-4">
+          <Icon name="terminal" size={15} class="text-slate-400" />
+          <span class="text-[12.5px] font-semibold text-slate-200">Terminal</span>
+          <div id="quick-commands" class:list={['no-scrollbar ml-2 hidden items-center gap-1 overflow-x-auto', initialSystem?.platform !== 'windows' && 'md:flex']}>
+            {quickCommands.map((q) => (
+              <button type="button" class="quick-cmd-btn h-6 rounded-md px-2 font-mono text-[11px] text-slate-400 transition hover:bg-slate-800 hover:text-slate-100" data-cmd={q.cmd}>{q.label}</button>
+            ))}
+          </div>
+          <div class="ml-auto flex items-center gap-1">
+            <button type="button" id="btn-clear-terminal" class="h-7 rounded-md px-2 text-[12px] text-slate-400 transition hover:bg-slate-800 hover:text-slate-100">Clear</button>
+            <button type="button" id="btn-close-terminal" class="inline-flex size-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-800 hover:text-slate-100" aria-label="Tutup terminal">
+              <Icon name="chevronDown" size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div id="terminal-output" class="terminal-scroll flex-1 select-text space-y-1.5 overflow-y-auto p-4 font-mono text-[12px] leading-relaxed text-slate-300">
+          <div class="text-slate-500">Ketik perintah lalu tekan Enter. Perintah dijalankan di folder yang sedang dibuka.</div>
+        </div>
+
+        <div class="flex h-11 shrink-0 items-center gap-2 border-t border-slate-800 px-4">
+          <span id="term-prompt" class="shrink-0 font-mono text-[12px] font-semibold text-brand-300">{userHost ? `${userHost}:$` : '$'}</span>
+          <input type="text" id="term-input" placeholder="ls -la" autocomplete="off" spellcheck="false" class="w-full bg-transparent font-mono text-[12px] text-slate-100 placeholder:text-slate-600 focus:outline-none" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ EDITOR ============ -->
+    <div id="editor-modal" class="dialog-backdrop">
+      <div class="flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center gap-3 border-b border-slate-100 px-5 py-3.5">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span id="editor-filename" class="truncate text-[15px] font-semibold text-slate-900">file.txt</span>
+              <span id="editor-modified-badge" class="badge badge-amber hidden">Belum disimpan</span>
+            </div>
+            <p id="editor-filepath" class="truncate font-mono text-[12px] text-slate-400">/</p>
+          </div>
+          <kbd class="hidden rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 sm:inline">Ctrl + S</kbd>
+          <button type="button" id="btn-save-editor" class="btn-primary">
+            <span id="editor-save-spinner" class="hidden size-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+            Simpan
+          </button>
+          <button type="button" id="btn-close-editor" class="icon-btn" aria-label="Tutup editor">
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+
+        <textarea id="editor-content" spellcheck="false" class="flex-1 resize-none bg-slate-950 p-5 font-mono text-[12.5px] leading-relaxed text-slate-100 outline-none selection:bg-brand-700 selection:text-white"></textarea>
+
+        <div class="flex items-center justify-between border-t border-slate-100 px-5 py-2 font-mono text-[11.5px] text-slate-500">
+          <span id="editor-stat-chars">0 baris</span>
+          <span>UTF-8</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ CREATE ============ -->
+    <div id="create-item-modal" class="dialog-backdrop">
+      <div class="dialog max-w-md">
+        <p id="create-item-title" class="dialog-title">File baru</p>
+        <p id="create-item-subtitle" class="dialog-subtitle truncate font-mono text-[12px]">/</p>
+
+        <div class="mt-5 space-y-4">
+          <div>
+            <label for="create-item-name" class="field-label">Nama</label>
+            <input type="text" id="create-item-name" placeholder="index.js" class="field-input font-mono" />
+          </div>
+          <div id="file-template-section">
+            <label for="select-file-template" class="field-label">Template</label>
+            <select id="select-file-template" class="field-input">
+              <option value="empty">File kosong</option>
+              <option value="bash">Bash script</option>
+              <option value="nginx">Nginx server block</option>
+              <option value="docker">Docker Compose</option>
+              <option value="node">Node.js server</option>
+              <option value="html">HTML5</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" id="btn-cancel-create" class="btn-secondary">Batal</button>
+          <button type="button" id="btn-submit-create" class="btn-primary">Buat</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ RENAME ============ -->
+    <div id="rename-modal" class="dialog-backdrop">
+      <div class="dialog max-w-md">
+        <p class="dialog-title">Ubah nama / pindahkan</p>
+        <p class="dialog-subtitle">Isi nama baru, atau path absolut untuk memindahkan.</p>
+
+        <div class="mt-5">
+          <label for="rename-new-name" class="field-label">Nama atau path baru</label>
+          <input type="text" id="rename-new-name" class="field-input font-mono" />
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" id="btn-cancel-rename" class="btn-secondary">Batal</button>
+          <button type="button" id="btn-submit-rename" class="btn-primary">Simpan</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ CHMOD ============ -->
+    <div id="chmod-modal" class="dialog-backdrop">
+      <div class="dialog max-w-md">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="dialog-title">Izin akses</p>
+            <p id="chmod-filepath" class="dialog-subtitle truncate font-mono text-[12px]">/</p>
+          </div>
+          <span id="chmod-octal-display" class="badge badge-brand font-mono text-[12px]">0755</span>
+        </div>
+
+        <table class="mt-5 w-full text-[13px]">
+          <thead>
+            <tr class="border-b border-slate-200 text-[11.5px] font-semibold uppercase tracking-wide text-slate-500">
+              <th class="py-2 text-left"></th>
+              <th class="py-2">Read</th>
+              <th class="py-2">Write</th>
+              <th class="py-2">Execute</th>
+            </tr>
+          </thead>
+          <tbody>
+            {permRows.map((row) => (
+              <tr class="border-b border-slate-100 last:border-0">
+                <td class="py-2.5 font-medium text-slate-700">{row.label}</td>
+                {['r', 'w', 'x'].map((bit) => (
+                  <td class="py-2.5 text-center">
+                    <input type="checkbox" id={`perm-${row.key}${bit}`} class="chmod-check size-4 rounded accent-brand-600" />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div class="mt-4">
+          <span class="field-label">Preset</span>
+          <div class="grid grid-cols-4 gap-1.5">
+            <button type="button" class="preset-chmod-btn btn-secondary h-8 px-2 font-mono text-[12px]" data-mode="755">755</button>
+            <button type="button" class="preset-chmod-btn btn-secondary h-8 px-2 font-mono text-[12px]" data-mode="644">644</button>
+            <button type="button" class="preset-chmod-btn btn-secondary h-8 px-2 font-mono text-[12px]" data-mode="600">600</button>
+            <button type="button" class="preset-chmod-btn btn-secondary h-8 px-2 font-mono text-[12px]" data-mode="777">777</button>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" id="btn-cancel-chmod" class="btn-secondary">Batal</button>
+          <button type="button" id="btn-submit-chmod" class="btn-primary">Terapkan</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</Layout>
+
+<script is:inline>
+  // ---------- State ----------
+  const appContainer = document.getElementById('app-container');
+  let currentPath = appContainer.dataset.initialHome || '/';
+  let fileList = [];
+  let showHidden = false;
+  let activeAuthType = 'password';
+  const cmdHistory = [];
+  let cmdHistoryIndex = -1;
+  let currentEditorPath = '';
+  let originalFileContent = '';
+  let itemToChmod = null;
+  let itemToRename = null;
+  let createType = 'file';
+
+  const $ = (id) => document.getElementById(id);
+
+  const unauthView = $('unauth-view');
+  const appShell = $('app-shell');
+  const editorModal = $('editor-modal');
+  const createItemModal = $('create-item-modal');
+  const renameModal = $('rename-modal');
+  const chmodModal = $('chmod-modal');
+  const terminalDrawer = $('terminal-drawer');
+  const appSidebar = $('app-sidebar');
+  const sidebarBackdrop = $('sidebar-backdrop');
+  const termInput = $('term-input');
+  const editorContent = $('editor-content');
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function joinPath(dir, name) {
+    return `${dir}/${name}`.replace(/\/+/g, '/');
+  }
+
+  // Login aplikasi kedaluwarsa (401 + appLogin): kembali ke halaman login, dari request mana pun.
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const res = await nativeFetch(...args);
+    if (res.status === 401 && (res.headers.get('content-type') || '').includes('json')) {
+      res.clone().json().then((d) => { if (d.appLogin) location.href = '/login'; }).catch(() => {});
+    }
+    return res;
+  };
+
+  document.querySelectorAll('.app-logout-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const ok = await window.confirmDialog({
+        title: 'Keluar dari aplikasi?',
+        message: 'Sesi SSH yang sedang terbuka juga akan ditutup.',
+        okText: 'Keluar',
+      });
+      if (!ok) return;
+      await fetch('/api/app-auth/logout', { method: 'POST' }).catch(() => {});
+      location.href = '/login';
+    });
+  });
+
+  function openModal(el) { el.classList.remove('hidden'); el.classList.add('flex'); }
+  function closeModal(el) { el.classList.add('hidden'); el.classList.remove('flex'); }
+  function isOpen(el) { return !el.classList.contains('hidden'); }
+
+  async function api(url, body) {
+    const res = await fetch(url, body === undefined ? undefined : {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `Request gagal (${res.status})`);
+    return data;
+  }
+
+  // ---------- Views ----------
+  function setUserHost(username, host) {
+    const label = `${username}@${host}`;
+    $('header-user-host').textContent = label;
+    $('sidebar-user-host').textContent = label;
+    $('term-prompt').textContent = `${label}:$`;
+  }
+
+  // Platform server menentukan perintah yang relevan (Windows tidak punya df, free, dll).
+  function setPlatform(system) {
+    if (!system) return;
+    const platform = system.platform || 'unix';
+    appContainer.dataset.platform = platform;
+    appContainer.dataset.shell = system.shell || 'sh';
+    if (system.uname) $('sidebar-os-info').textContent = system.uname;
+    $('quick-commands').classList.toggle('md:flex', platform !== 'windows');
+  }
+
+  function switchToAuthView() {
+    unauthView.classList.add('hidden');
+    unauthView.classList.remove('flex');
+    appShell.classList.remove('hidden');
+    fetchStatus();
+    loadDirectory(currentPath);
+    setView(viewFromHash());
+  }
+
+  // ---------- Navigasi view (File Manager / Pipelines / Storage) ----------
+  const VIEW_TITLES = { files: 'File Manager', pipelines: 'Pipelines', storage: 'Storage' };
+  let currentView = 'files';
+
+  function viewFromHash() {
+    const hash = location.hash.slice(1);
+    return hash in VIEW_TITLES ? hash : 'files';
+  }
+
+  function setView(view) {
+    currentView = view in VIEW_TITLES ? view : 'files';
+    document.querySelectorAll('[data-view-panel]').forEach((panel) => {
+      panel.classList.toggle('hidden', panel.dataset.viewPanel !== currentView);
+    });
+    document.querySelectorAll('.view-link').forEach((link) => {
+      link.classList.toggle('is-active', link.dataset.view === currentView);
+    });
+    $('header-title').textContent = VIEW_TITLES[currentView];
+    $('breadcrumb-container').classList.toggle('invisible', currentView !== 'files');
+    updateActiveBookmark();
+
+    // Komponen view (modul terpisah) mendengarkan event ini untuk memuat datanya.
+    appContainer.dataset.view = currentView;
+    appContainer.dataset.ready = 'true';
+    window.dispatchEvent(new CustomEvent('app:view', { detail: { view: currentView } }));
+  }
+
+  window.addEventListener('hashchange', () => {
+    if (!appShell.classList.contains('hidden')) setView(viewFromHash());
+  });
+
+  document.querySelectorAll('.view-link').forEach((link) => {
+    link.addEventListener('click', () => setSidebar(false));
+  });
+
+  // Dipakai view lain (mis. Storage) untuk membuka folder di File Manager.
+  window.openInFiles = (path) => {
+    if (location.hash !== '#files') history.pushState(null, '', '#files');
+    setView('files');
+    loadDirectory(path);
+    window.scrollTo({ top: 0 });
+  };
+
+  function switchToUnauthView() {
+    appShell.classList.add('hidden');
+    unauthView.classList.remove('hidden');
+    unauthView.classList.add('flex');
+    closeTerminal();
+    loadSavedPresets();
+  }
+
+  // ---------- Sidebar ----------
+  function setSidebar(open) {
+    appSidebar.classList.toggle('-translate-x-full', !open);
+    sidebarBackdrop.classList.toggle('hidden', !open);
+  }
+  $('btn-sidebar-toggle').addEventListener('click', () => setSidebar(true));
+  $('btn-sidebar-close').addEventListener('click', () => setSidebar(false));
+  sidebarBackdrop.addEventListener('click', () => setSidebar(false));
+
+  document.querySelectorAll('.quick-jump-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (currentView !== 'files') window.openInFiles(btn.dataset.path);
+      else loadDirectory(btn.dataset.path);
+      setSidebar(false);
+    });
+  });
+
+  function updateActiveBookmark() {
+    // Butir yang menyala adalah bookmark terpanjang yang memuat folder aktif.
+    let best = null;
+    document.querySelectorAll('.quick-jump-btn').forEach((btn) => {
+      const p = btn.dataset.path;
+      const match = p === '/' || currentPath === p || currentPath.startsWith(p + '/');
+      if (match && (!best || p.length > best.dataset.path.length)) best = btn;
+    });
+    document.querySelectorAll('.quick-jump-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', btn === best && currentView === 'files');
+    });
+  }
+
+  // ---------- Login ----------
+  function loadSavedPresets() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ssh_gui_presets') || '[]');
+      const select = $('saved-presets-select');
+      select.innerHTML = '<option value="">Pilih koneksi tersimpan…</option>';
+      saved.forEach((item, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = `${item.username}@${item.host}:${item.port || 22}`;
+        select.appendChild(opt);
+      });
+      $('saved-presets-container').classList.toggle('hidden', saved.length === 0);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  $('saved-presets-select').addEventListener('change', (e) => {
+    const idx = e.target.value;
+    if (idx === '') return;
+    const item = JSON.parse(localStorage.getItem('ssh_gui_presets') || '[]')[idx];
+    if (item) {
+      $('input-host').value = item.host || '';
+      $('input-port').value = item.port || 22;
+      $('input-username').value = item.username || 'root';
+      $('input-password').focus();
+    }
+  });
+
+  function setAuthType(type) {
+    activeAuthType = type;
+    $('tab-auth-password').classList.toggle('is-active', type === 'password');
+    $('tab-auth-key').classList.toggle('is-active', type === 'key');
+    $('field-password').classList.toggle('hidden', type !== 'password');
+    $('field-private-key').classList.toggle('hidden', type !== 'key');
+    $('field-private-key').classList.toggle('flex', type === 'key');
+  }
+  $('tab-auth-password').addEventListener('click', () => setAuthType('password'));
+  $('tab-auth-key').addEventListener('click', () => setAuthType('key'));
+
+  $('btn-toggle-pwd').addEventListener('click', () => {
+    const input = $('input-password');
+    input.type = input.type === 'password' ? 'text' : 'password';
+  });
+
+  $('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const host = $('input-host').value.trim();
+    const port = parseInt($('input-port').value, 10) || 22;
+    const username = $('input-username').value.trim();
+    const password = $('input-password').value;
+    const privateKey = $('input-private-key').value.trim();
+    const passphrase = $('input-passphrase').value;
+
+    const errorDiv = $('login-error-msg');
+    const submitBtn = $('btn-submit-login');
+    errorDiv.classList.add('hidden');
+    errorDiv.classList.remove('flex');
+    $('login-spinner').classList.remove('hidden');
+    submitBtn.disabled = true;
+    $('login-btn-text').textContent = 'Menghubungkan…';
+
+    try {
+      const data = await api('/api/auth/login', {
+        host,
+        port,
+        username,
+        password: activeAuthType === 'password' ? password : undefined,
+        privateKey: activeAuthType === 'key' ? privateKey : undefined,
+        passphrase: activeAuthType === 'key' && passphrase ? passphrase : undefined,
+      });
+
+      if ($('checkbox-save-preset').checked) {
+        try {
+          const saved = JSON.parse(localStorage.getItem('ssh_gui_presets') || '[]')
+            .filter((s) => !(s.host === host && s.username === username));
+          saved.unshift({ host, port, username });
+          localStorage.setItem('ssh_gui_presets', JSON.stringify(saved.slice(0, 8)));
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      $('input-password').value = '';
+      $('input-passphrase').value = '';
+      window.showToast(`Terhubung ke ${username}@${host}:${port}`, 'success');
+      setUserHost(username, host);
+      setPlatform(data.system);
+      currentPath = data.system?.homeDir || '/';
+      switchToAuthView();
+    } catch (err) {
+      errorDiv.textContent = err.message;
+      errorDiv.classList.remove('hidden');
+      errorDiv.classList.add('flex');
+    } finally {
+      $('login-spinner').classList.add('hidden');
+      submitBtn.disabled = false;
+      $('login-btn-text').textContent = 'Connect';
+    }
+  });
+
+  $('btn-disconnect').addEventListener('click', async () => {
+    const ok = await window.confirmDialog({
+      title: 'Putuskan koneksi?',
+      message: 'Sesi SSH ke server ini akan ditutup.',
+      okText: 'Disconnect',
+    });
+    if (!ok) return;
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.showToast('Koneksi SSH ditutup', 'info');
+    } finally {
+      switchToUnauthView();
+    }
+  });
+
+  async function fetchStatus() {
+    try {
+      const data = await api('/api/auth/status');
+      if (data.authenticated) {
+        setUserHost(data.user.username, data.user.host);
+        setPlatform(data.system);
+      } else {
+        switchToUnauthView();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  // ---------- Directory ----------
+  async function loadDirectory(path) {
+    currentPath = path.replace(/\\/g, '/').replace(/\/+/g, '/');
+    if (!currentPath.startsWith('/')) currentPath = '/' + currentPath;
+    if (currentPath.length > 1) currentPath = currentPath.replace(/\/$/, '');
+
+    const spinner = $('table-loading-spinner');
+    spinner.classList.remove('hidden');
+    spinner.classList.add('flex');
+    $('current-full-path').textContent = currentPath;
+    $('page-title').textContent = currentPath === '/' ? 'Root' : currentPath.split('/').pop();
+    renderBreadcrumbs(currentPath);
+    updateActiveBookmark();
+
+    try {
+      const data = await api(`/api/files/list?path=${encodeURIComponent(currentPath)}`);
+      fileList = data.items || [];
+      renderFileList();
+    } catch (err) {
+      fileList = [];
+      window.showToast(err.message, 'error');
+      $('file-list-tbody').innerHTML = `<tr><td colspan="5" class="px-4 py-14 text-center text-red-600">${escapeHtml(err.message)}</td></tr>`;
+      $('directory-summary').textContent = '0 item';
+    } finally {
+      spinner.classList.add('hidden');
+      spinner.classList.remove('flex');
+    }
+  }
+
+  function renderBreadcrumbs(path) {
+    const container = $('breadcrumb-container');
+    container.innerHTML = '';
+    const segments = path.split('/').filter(Boolean);
+
+    const crumb = (label, target, isLast) => {
+      const el = document.createElement(isLast ? 'span' : 'button');
+      el.className = isLast ? 'text-slate-600' : 'transition hover:text-slate-700';
+      el.textContent = label;
+      if (!isLast) el.onclick = () => loadDirectory(target);
+      container.appendChild(el);
+    };
+
+    crumb('Root', '/', segments.length === 0);
+    let accum = '';
+    segments.forEach((seg, i) => {
+      const sep = document.createElement('span');
+      sep.textContent = '/';
+      container.appendChild(sep);
+      accum += '/' + seg;
+      crumb(seg, accum, i === segments.length - 1);
+    });
+  }
+
+  $('btn-refresh').addEventListener('click', () => {
+    const icon = document.querySelector('.refresh-icon');
+    icon.classList.add('animate-spin');
+    loadDirectory(currentPath).finally(() => setTimeout(() => icon.classList.remove('animate-spin'), 300));
+  });
+
+  $('btn-toggle-hidden').addEventListener('change', (e) => {
+    showHidden = e.target.checked;
+    renderFileList();
+  });
+
+  $('search-filter-input').addEventListener('input', renderFileList);
+
+  function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), sizes.length - 1);
+    return parseFloat((bytes / Math.pow(1024, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  function formatDate(timestamp) {
+    if (!timestamp) return '—';
+    return new Date(timestamp).toLocaleString('id-ID', {
+      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  }
+
+  const svg = (d, cls = 'size-4') =>
+    `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+
+  const ROW_ICONS = {
+    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+    file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>',
+    code: '<path d="m8 16-4-4 4-4M16 8l4 4-4 4M14 4l-4 16"/>',
+    config: '<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="12" r="2"/><circle cx="15" cy="18" r="2"/>',
+    shell: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+    up: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v6"/>',
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    download: '<path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 4v11M7 10l5 5 5-5"/>',
+    rename: '<path d="M4 7V5h16v2M9 19h6M12 5v14"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    trash: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>',
+  };
+
+  function getFileIcon(item) {
+    if (item.isDirectory) return svg(ROW_ICONS.folder, 'size-[18px] shrink-0 text-amber-500');
+    if (item.isSymbolicLink) return svg(ROW_ICONS.link, 'size-[18px] shrink-0 text-sky-500');
+    const ext = item.name.includes('.') ? item.name.split('.').pop().toLowerCase() : '';
+    if (['js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'vue', 'astro', 'py', 'php', 'go', 'rs', 'html', 'css'].includes(ext)) {
+      return svg(ROW_ICONS.code, 'size-[18px] shrink-0 text-blue-500');
+    }
+    if (['json', 'yaml', 'yml', 'xml', 'toml', 'ini', 'env', 'conf', 'cfg'].includes(ext) || item.name.startsWith('.env')) {
+      return svg(ROW_ICONS.config, 'size-[18px] shrink-0 text-teal-500');
+    }
+    if (['sh', 'bash', 'zsh'].includes(ext)) return svg(ROW_ICONS.shell, 'size-[18px] shrink-0 text-brand-600');
+    return svg(ROW_ICONS.file, 'size-[18px] shrink-0 text-slate-400');
+  }
+
+  function actionButton(action, title, icon, danger = false) {
+    const hover = danger ? 'hover:bg-red-50 hover:text-red-600' : '';
+    return `<button type="button" data-action="${action}" title="${title}" aria-label="${title}" class="icon-btn ${hover}">${svg(icon)}</button>`;
+  }
+
+  function renderFileList() {
+    const tbody = $('file-list-tbody');
+    tbody.innerHTML = '';
+    const query = $('search-filter-input').value.toLowerCase().trim();
+
+    const filtered = fileList.filter((item) => {
+      if (!showHidden && item.name.startsWith('.')) return false;
+      return !query || item.name.toLowerCase().includes(query);
+    });
+
+    if (currentPath !== '/' && !query) {
+      const tr = document.createElement('tr');
+      tr.className = 'cursor-pointer border-b border-slate-100 text-slate-500 hover:bg-slate-50/70';
+      tr.innerHTML = `<td class="px-4 py-2.5" colspan="5"><span class="flex items-center gap-3">${svg(ROW_ICONS.up, 'size-[18px] text-slate-400')}<span>..</span></span></td>`;
+      tr.onclick = () => loadDirectory(currentPath.split('/').slice(0, -1).join('/') || '/');
+      tbody.appendChild(tr);
+    }
+
+    let folderCount = 0;
+    let fileCount = 0;
+
+    if (filtered.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan="5" class="px-4 py-14 text-center text-slate-400">${query ? 'Tidak ada item yang cocok.' : 'Folder ini kosong.'}</td>`;
+      tbody.appendChild(tr);
+    }
+
+    filtered.forEach((item) => {
+      if (item.isDirectory) folderCount++;
+      else fileCount++;
+
+      const tr = document.createElement('tr');
+      tr.className = 'group border-b border-slate-100 last:border-0 hover:bg-slate-50/70';
+      tr.innerHTML = `
+        <td class="px-4 py-2.5">
+          <button type="button" data-action="open" class="flex max-w-full items-center gap-3 text-left font-medium text-slate-800 hover:text-brand-700">
+            ${getFileIcon(item)}
+            <span class="truncate">${escapeHtml(item.name)}</span>
+          </button>
+        </td>
+        <td class="hidden px-4 py-2.5 text-slate-500 sm:table-cell">${item.isDirectory ? '—' : formatBytes(item.size)}</td>
+        <td class="hidden px-4 py-2.5 md:table-cell">
+          <span class="font-mono text-[12px] text-slate-500">${escapeHtml(item.permissions)}</span>
+          <span class="badge badge-slate ml-1 font-mono">${escapeHtml(item.octal)}</span>
+        </td>
+        <td class="hidden px-4 py-2.5 text-slate-500 lg:table-cell">${formatDate(item.modifyTime)}</td>
+        <td class="px-4 py-1.5">
+          <div class="flex items-center justify-end gap-0.5 transition lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
+            ${item.isDirectory ? '' : actionButton('edit', 'Edit', ROW_ICONS.edit)}
+            ${item.isDirectory ? '' : `<a href="/api/files/download?path=${encodeURIComponent(item.path)}" download title="Download" aria-label="Download" class="icon-btn">${svg(ROW_ICONS.download)}</a>`}
+            ${actionButton('rename', 'Ubah nama', ROW_ICONS.rename)}
+            ${actionButton('chmod', 'Izin akses', ROW_ICONS.lock)}
+            ${actionButton('delete', 'Hapus', ROW_ICONS.trash, true)}
+          </div>
+        </td>
+      `;
+
+      const handlers = {
+        open: () => (item.isDirectory ? loadDirectory(item.path) : openFileInEditor(item.path, item.name)),
+        edit: () => openFileInEditor(item.path, item.name),
+        rename: () => openRenameModal(item),
+        chmod: () => openChmodModal(item),
+        delete: () => deleteItem(item),
+      };
+      tr.querySelectorAll('[data-action]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          handlers[btn.dataset.action]();
+        });
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    $('directory-summary').textContent = `${filtered.length} item · ${folderCount} folder, ${fileCount} file`;
+  }
+
+  // ---------- Editor ----------
+  async function openFileInEditor(filePath, fileName) {
+    currentEditorPath = filePath;
+    $('editor-filename').textContent = fileName || filePath.split('/').pop();
+    $('editor-filepath').textContent = filePath;
+    $('editor-modified-badge').classList.add('hidden');
+    editorContent.value = 'Memuat isi file…';
+    editorContent.disabled = true;
+    originalFileContent = editorContent.value;
+    openModal(editorModal);
+
+    try {
+      const data = await api(`/api/files/read?path=${encodeURIComponent(filePath)}`);
+      editorContent.value = data.content;
+      originalFileContent = data.content;
+      editorContent.disabled = false;
+      editorContent.focus();
+      updateEditorStats();
+    } catch (err) {
+      window.showToast(err.message, 'error');
+      closeModal(editorModal);
+    }
+  }
+
+  function updateEditorStats() {
+    const text = editorContent.value;
+    $('editor-stat-chars').textContent = `${text.split('\n').length} baris · ${text.length} karakter`;
+    $('editor-modified-badge').classList.toggle('hidden', text === originalFileContent);
+  }
+
+  editorContent.addEventListener('input', updateEditorStats);
+
+  editorContent.addEventListener('keydown', (e) => {
+    // Tab menyisipkan dua spasi, bukan pindah fokus.
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const { selectionStart: s, selectionEnd: end } = editorContent;
+      editorContent.setRangeText('  ', s, end, 'end');
+      updateEditorStats();
+    }
+  });
+
+  async function saveCurrentFile() {
+    if (!currentEditorPath || editorContent.disabled) return;
+    const spinner = $('editor-save-spinner');
+    spinner.classList.remove('hidden');
+
+    try {
+      await api('/api/files/save', { path: currentEditorPath, content: editorContent.value });
+      originalFileContent = editorContent.value;
+      updateEditorStats();
+      window.showToast('File disimpan', 'success');
+      loadDirectory(currentPath);
+    } catch (err) {
+      window.showToast(err.message, 'error');
+    } finally {
+      spinner.classList.add('hidden');
+    }
+  }
+
+  async function closeEditorModal() {
+    if (editorContent.value !== originalFileContent) {
+      const ok = await window.confirmDialog({
+        title: 'Tutup tanpa menyimpan?',
+        message: 'Perubahan yang belum disimpan akan hilang.',
+        okText: 'Tutup',
+      });
+      if (!ok) return;
+    }
+    closeModal(editorModal);
+  }
+
+  $('btn-save-editor').addEventListener('click', saveCurrentFile);
+  $('btn-close-editor').addEventListener('click', closeEditorModal);
+
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && isOpen(editorModal)) {
+      e.preventDefault();
+      saveCurrentFile();
+    }
+    if (e.key === 'Escape') {
+      if (isOpen($('confirm-dialog'))) return;
+      if (isOpen(editorModal)) closeEditorModal();
+      [createItemModal, renameModal, chmodModal].forEach(closeModal);
+    }
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+      if (isOpen(createItemModal)) $('btn-submit-create').click();
+      else if (isOpen(renameModal)) $('btn-submit-rename').click();
+    }
+  });
+
+  // Klik di luar kotak dialog menutupnya.
+  [createItemModal, renameModal, chmodModal].forEach((modal) => {
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(modal); });
+  });
+
+  // ---------- Create ----------
+  const templates = {
+    empty: '',
+    bash: '#!/bin/bash\nset -e\n\necho "Hello from SSH!"\n',
+    nginx: 'server {\n    listen 80;\n    server_name example.com;\n    root /var/www/html;\n    index index.html index.php;\n\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}\n',
+    docker: 'services:\n  app:\n    image: nginx:alpine\n    ports:\n      - "8080:80"\n    restart: always\n',
+    node: 'import http from "node:http";\n\nconst server = http.createServer((req, res) => {\n  res.writeHead(200, { "Content-Type": "application/json" });\n  res.end(JSON.stringify({ status: "ok" }));\n});\n\nserver.listen(3000, () => {\n  console.log("Server running on port 3000");\n});\n',
+    html: '<!DOCTYPE html>\n<html lang="id">\n<head>\n  <meta charset="UTF-8">\n  <title>App</title>\n</head>\n<body>\n  <h1>Hello World</h1>\n</body>\n</html>\n',
+  };
+
+  function openCreateModal(type) {
+    createType = type;
+    $('create-item-title').textContent = type === 'file' ? 'File baru' : 'Folder baru';
+    $('create-item-subtitle').textContent = `di ${currentPath}`;
+    $('create-item-name').placeholder = type === 'file' ? 'index.js' : 'folder-baru';
+    $('file-template-section').classList.toggle('hidden', type !== 'file');
+    $('select-file-template').value = 'empty';
+    $('create-item-name').value = '';
+    openModal(createItemModal);
+    $('create-item-name').focus();
+  }
+
+  $('btn-new-file').addEventListener('click', () => openCreateModal('file'));
+  $('btn-new-folder').addEventListener('click', () => openCreateModal('folder'));
+  $('btn-cancel-create').addEventListener('click', () => closeModal(createItemModal));
+
+  $('btn-submit-create').addEventListener('click', async () => {
+    const name = $('create-item-name').value.trim();
+    if (!name) {
+      window.showToast('Nama wajib diisi', 'error');
+      return;
+    }
+    const targetPath = joinPath(currentPath, name);
+
+    try {
+      if (createType === 'folder') {
+        await api('/api/files/mkdir', { path: targetPath });
+        window.showToast(`Folder '${name}' dibuat`, 'success');
+      } else {
+        await api('/api/files/save', { path: targetPath, content: templates[$('select-file-template').value] || '' });
+        window.showToast(`File '${name}' dibuat`, 'success');
+      }
+      closeModal(createItemModal);
+      loadDirectory(currentPath);
+    } catch (err) {
+      window.showToast(err.message, 'error');
+    }
+  });
+
+  // ---------- Rename ----------
+  function openRenameModal(item) {
+    itemToRename = item;
+    const input = $('rename-new-name');
+    input.value = item.name;
+    openModal(renameModal);
+    input.focus();
+    // Pilih nama tanpa ekstensi, seperti file manager desktop.
+    const dot = item.isDirectory ? -1 : item.name.lastIndexOf('.');
+    input.setSelectionRange(0, dot > 0 ? dot : item.name.length);
+  }
+
+  $('btn-cancel-rename').addEventListener('click', () => closeModal(renameModal));
+
+  $('btn-submit-rename').addEventListener('click', async () => {
+    if (!itemToRename) return;
+    const newName = $('rename-new-name').value.trim();
+    if (!newName) {
+      window.showToast('Nama baru wajib diisi', 'error');
+      return;
+    }
+    const newPath = newName.startsWith('/') ? newName : joinPath(currentPath, newName);
+
+    try {
+      await api('/api/files/rename', { oldPath: itemToRename.path, newPath });
+      window.showToast('Nama diubah', 'success');
+      closeModal(renameModal);
+      loadDirectory(currentPath);
+    } catch (err) {
+      window.showToast(err.message, 'error');
+    }
+  });
+
+  // ---------- Delete ----------
+  async function deleteItem(item) {
+    const ok = await window.confirmDialog({
+      title: item.isDirectory ? `Hapus folder '${item.name}'?` : `Hapus '${item.name}'?`,
+      message: item.isDirectory
+        ? 'Folder beserta seluruh isinya akan dihapus permanen dari server.'
+        : 'File akan dihapus permanen dari server.',
+      okText: 'Hapus',
+    });
+    if (!ok) return;
+
+    try {
+      await api('/api/files/delete', { path: item.path, isDirectory: item.isDirectory });
+      window.showToast(`'${item.name}' dihapus`, 'info');
+      loadDirectory(currentPath);
+    } catch (err) {
+      window.showToast(err.message, 'error');
+    }
+  }
+
+  // ---------- Chmod ----------
+  const PERM_BITS = [
+    ['ur', 0o400], ['uw', 0o200], ['ux', 0o100],
+    ['gr', 0o040], ['gw', 0o020], ['gx', 0o010],
+    ['or', 0o004], ['ow', 0o002], ['ox', 0o001],
+  ];
+
+  function setPermissions(mode) {
+    PERM_BITS.forEach(([id, bit]) => { $(`perm-${id}`).checked = !!(mode & bit); });
+    updateOctalDisplay();
+  }
+
+  function getCalculatedOctal() {
+    const mode = PERM_BITS.reduce((acc, [id, bit]) => acc | ($(`perm-${id}`).checked ? bit : 0), 0);
+    return '0' + mode.toString(8).padStart(3, '0');
+  }
+
+  function updateOctalDisplay() {
+    const octal = getCalculatedOctal();
+    $('chmod-octal-display').textContent = octal;
+    document.querySelectorAll('.preset-chmod-btn').forEach((btn) => {
+      const active = '0' + btn.dataset.mode === octal;
+      btn.classList.toggle('border-brand-500', active);
+      btn.classList.toggle('bg-brand-50', active);
+      btn.classList.toggle('text-brand-700', active);
+    });
+  }
+
+  function openChmodModal(item) {
+    itemToChmod = item;
+    $('chmod-filepath').textContent = item.path;
+    setPermissions(item.mode || 0);
+    openModal(chmodModal);
+  }
+
+  document.querySelectorAll('.chmod-check').forEach((chk) => chk.addEventListener('change', updateOctalDisplay));
+  document.querySelectorAll('.preset-chmod-btn').forEach((btn) => {
+    btn.addEventListener('click', () => setPermissions(parseInt(btn.dataset.mode, 8)));
+  });
+
+  $('btn-cancel-chmod').addEventListener('click', () => closeModal(chmodModal));
+
+  $('btn-submit-chmod').addEventListener('click', async () => {
+    if (!itemToChmod) return;
+    const octal = getCalculatedOctal();
+    try {
+      await api('/api/files/chmod', { path: itemToChmod.path, mode: octal });
+      window.showToast(`Izin akses diubah ke ${octal}`, 'success');
+      closeModal(chmodModal);
+      loadDirectory(currentPath);
+    } catch (err) {
+      window.showToast(err.message, 'error');
+    }
+  });
+
+  // ---------- Upload ----------
+  async function uploadFiles(files) {
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('directory', currentPath);
+      try {
+        const res = await fetch('/api/files/upload', { method: 'POST', body: formData });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Gagal mengunggah');
+        window.showToast(`'${file.name}' diunggah`, 'success');
+      } catch (err) {
+        window.showToast(`${file.name}: ${err.message}`, 'error');
+      }
+    }
+    loadDirectory(currentPath);
+  }
+
+  $('file-upload-input').addEventListener('change', async (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = '';
+    if (files.length) await uploadFiles(files);
+  });
+
+  // Drag & drop: hitung enter/leave supaya overlay tidak berkedip saat kursor
+  // melewati elemen anak, dan hanya tampil untuk file dari luar browser.
+  const dragOverlay = $('drag-overlay');
+  let dragDepth = 0;
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  const canDrop = () => !appShell.classList.contains('hidden') && currentView === 'files' && !isOpen(editorModal);
+
+  function hideDragOverlay() {
+    dragDepth = 0;
+    dragOverlay.classList.add('hidden');
+    dragOverlay.classList.remove('flex');
+  }
+
+  window.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e) || !canDrop()) return;
+    e.preventDefault();
+    dragDepth++;
+    $('drag-dest-path').textContent = currentPath;
+    dragOverlay.classList.remove('hidden');
+    dragOverlay.classList.add('flex');
+  });
+  window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('dragleave', (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) hideDragOverlay();
+  });
+  window.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    hideDragOverlay();
+    if (canDrop() && e.dataTransfer.files.length) uploadFiles([...e.dataTransfer.files]);
+  });
+
+  // ---------- Terminal ----------
+  let isTerminalOpen = false;
+
+  function setTerminal(open) {
+    isTerminalOpen = open;
+    terminalDrawer.classList.toggle('translate-y-full', !open);
+    if (open) termInput.focus();
+  }
+  function closeTerminal() { setTerminal(false); }
+
+  $('btn-toggle-terminal').addEventListener('click', () => setTerminal(!isTerminalOpen));
+  $('btn-close-terminal').addEventListener('click', closeTerminal);
+  $('btn-clear-terminal').addEventListener('click', () => { $('terminal-output').innerHTML = ''; });
+
+  termInput.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      const cmd = termInput.value.trim();
+      if (!cmd) return;
+      cmdHistory.push(cmd);
+      cmdHistoryIndex = cmdHistory.length;
+      termInput.value = '';
+      await executeRemoteCommand(cmd);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (cmdHistoryIndex > 0) termInput.value = cmdHistory[--cmdHistoryIndex] || '';
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (cmdHistoryIndex < cmdHistory.length - 1) {
+        termInput.value = cmdHistory[++cmdHistoryIndex] || '';
+      } else {
+        cmdHistoryIndex = cmdHistory.length;
+        termInput.value = '';
+      }
+    }
+  });
+
+  document.querySelectorAll('.quick-cmd-btn').forEach((btn) => {
+    btn.addEventListener('click', () => executeRemoteCommand(btn.dataset.cmd));
+  });
+
+  function termLine(text, className, tag = 'div') {
+    const el = document.createElement(tag);
+    el.className = className;
+    el.textContent = text;
+    $('terminal-output').appendChild(el);
+    return el;
+  }
+
+  async function executeRemoteCommand(cmd) {
+    const output = $('terminal-output');
+    termLine(`$ ${cmd}`, 'font-semibold text-brand-300');
+    const running = termLine('Menjalankan…', 'animate-pulse text-slate-500');
+    output.scrollTop = output.scrollHeight;
+
+    try {
+      const res = await fetch('/api/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Folder kerja diterjemahkan server sesuai shell (sh / cmd / PowerShell).
+        // sudo -n: gagal cepat bila sudo minta password, bukan menggantung.
+        body: JSON.stringify({ command: cmd, cwd: currentPath, sudo: 'nonInteractive' }),
+      });
+      const data = await res.json();
+      running.remove();
+
+      if (!res.ok) throw new Error(data.error || `Request gagal (${res.status})`);
+      if (data.stdout) termLine(data.stdout, 'whitespace-pre-wrap text-slate-200', 'pre');
+      if (data.stderr) termLine(data.stderr, 'whitespace-pre-wrap text-red-400', 'pre');
+      if (/sudo: (a )?password is required|sudo: a terminal is required/i.test(data.stderr || '')) {
+        termLine('Terminal ini tidak interaktif sehingga sudo tidak bisa meminta password. Jalankan lewat Pipeline (password sudo diminta saat run) atau atur NOPASSWD di sudoers.', 'text-amber-400');
+      }
+      if (data.exitCode !== 0 && !data.stderr && !data.stdout) termLine(`Exit code: ${data.exitCode}`, 'text-amber-400');
+    } catch (err) {
+      running.remove();
+      termLine(`Error: ${err.message}`, 'text-red-400');
+    }
+
+    output.scrollTop = output.scrollHeight;
+  }
+
+  // ---------- Start ----------
+  if (appContainer.dataset.authenticated === 'true') {
+    switchToAuthView();
+  } else {
+    loadSavedPresets();
+  }
+</script>

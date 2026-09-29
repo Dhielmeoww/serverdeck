@@ -1,0 +1,26 @@
+{
+  "name": "terminal-gui",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host",
+    "build": "astro build",
+    "preview": "astro preview",
+    "start": "node ./dist/server/entry.mjs",
+    "docker:build": "docker build -t yuuto999/serverdeck:local .",
+    "docker:publish": "powershell -ExecutionPolicy Bypass -File scripts/publish-docker.ps1"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.1.6",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.3.5",
+    "nanoid": "^5.1.0",
+    "ssh2": "^1.17.0",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@types/ssh2": "^1.15.6",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "format": "serverdeck-pipeline",
+  "version": 1,
+  "pipeline": {
+    "name": "Tambah domain + SSL",
+    "description": "Reverse proxy DOMAIN → UPSTREAM dengan HTTPS Let's Encrypt. Ganti variabel sebelum run. Berhenti bila konfigurasi domain sudah ada.",
+    "variables": [
+      { "key": "DOMAIN", "value": "app.example.com" },
+      { "key": "NAME", "value": "app" },
+      { "key": "UPSTREAM", "value": "http://127.0.0.1:3000" },
+      { "key": "CONF_DIR", "value": "/etc/nginx/conf.d" },
+      { "key": "EMAIL", "value": "" }
+    ],
+    "steps": [
+      {
+        "type": "command",
+        "name": "Cek konfigurasi Nginx saat ini",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "command": "sudo nginx -t", "cwd": "" }
+      },
+      {
+        "type": "condition",
+        "name": "Konfigurasi domain belum ada?",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "command": "test -e {{CONF_DIR}}/{{NAME}}.conf", "check": "exit_nonzero", "value": "" }
+      },
+      {
+        "type": "command",
+        "name": "Cek DNS domain",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "command": "getent hosts {{DOMAIN}} || { echo \"DNS {{DOMAIN}} belum bisa di-resolve dari server ini\" >&2; exit 1; }", "cwd": "" }
+      },
+      {
+        "type": "write_file",
+        "name": "Buat file konfigurasi Nginx",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": {
+          "sudo": true,
+          "path": "{{CONF_DIR}}/{{NAME}}.conf",
+          "mode": "644",
+          "content": "server {\n    listen 80;\n    server_name {{DOMAIN}};\n\n    location / {\n        proxy_pass {{UPSTREAM}};\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n    }\n}\n"
+        }
+      },
+      {
+        "type": "command",
+        "name": "Uji konfigurasi baru (batal bila gagal)",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "command": "sudo nginx -t || { sudo rm -f {{CONF_DIR}}/{{NAME}}.conf; echo \"Konfigurasi baru tidak valid, {{NAME}}.conf dihapus lagi\" >&2; exit 1; }", "cwd": "" }
+      },
+      {
+        "type": "command",
+        "name": "Reload Nginx",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "command": "sudo systemctl reload nginx", "cwd": "" }
+      },
+      {
+        "type": "command",
+        "name": "Terbitkan sertifikat SSL",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 600,
+        "config": { "command": "sudo certbot --nginx -d {{DOMAIN}} --non-interactive --agree-tos --redirect $( [ -n \"{{EMAIL}}\" ] && echo \"-m {{EMAIL}}\" || echo \"--register-unsafely-without-email\" )", "cwd": "" }
+      },
+      {
+        "type": "command",
+        "name": "Restart Nginx",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "command": "sudo systemctl restart nginx", "cwd": "" }
+      },
+      {
+        "type": "wait",
+        "name": "Tunggu Nginx siap",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "seconds": 2 }
+      },
+      {
+        "type": "http_check",
+        "name": "Cek HTTPS",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "url": "https://{{DOMAIN}}", "expectStatus": "200,301,302" }
+      },
+      {
+        "type": "command",
+        "name": "Info sertifikat",
+        "enabled": true,
+        "onError": "stop",
+        "timeoutSec": 300,
+        "config": { "command": "sudo certbot certificates -d {{DOMAIN}}", "cwd": "" }
+      }
+    ]
+  }
+}
