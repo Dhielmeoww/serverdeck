@@ -13,4 +13,4 @@ docker-compose*.yml
 scripts
 .github
 examples
-README.md
+README*.md

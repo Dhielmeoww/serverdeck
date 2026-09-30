@@ -2,9 +2,11 @@
 
 # ServerDeck
 
-**Kelola server lewat browser: file, terminal, otomasi, dan storage, tanpa menyerahkan data kamu ke siapa pun.**
+**Kelola server lewat browser: file, terminal, otomasi, Docker, dan storage, tanpa menyerahkan data kamu ke siapa pun.**
 
-Satu container. Tanpa database. Tanpa agent di server tujuan. Cukup SSH.
+Satu container. Database opsional, di servermu sendiri. Tanpa agent di server tujuan. Cukup SSH.
+
+**Bahasa Indonesia** · [English](README.en.md)
 
 </div>
 
@@ -98,7 +100,7 @@ Lapisan pengaman lainnya:
 - Password SSH hanya boleh disimpan bila login web aktif, sehingga orang yang sekadar tahu alamat ServerDeck tidak bisa memakai koneksi tersimpan.
 - Container berjalan sebagai user non-root dengan `no-new-privileges`.
 
-> **Yang perlu dipahami:** selama kamu terhubung, proses ServerDeck memegang koneksi SSH ke server tujuan, dan kredensial dikirim dari browser ke ServerDeck saat login. Jadi jalankan ServerDeck di mesin yang kamu percaya, dan **akses lewat HTTPS** bila dibuka di luar jaringan lokal (lihat [Reverse proxy HTTPS](#reverse-proxy-https)).
+> **Yang perlu dipahami:** selama kamu terhubung, proses ServerDeck memegang koneksi SSH ke server tujuan, dan kredensial dikirim dari browser ke ServerDeck saat login. Jadi jalankan ServerDeck di mesin yang kamu percaya, dan **akses lewat HTTPS** bila dibuka di luar jaringan lokal (misalnya dengan Nginx + Certbot sebagai reverse proxy di depannya).
 
 ---
 
@@ -182,14 +184,22 @@ docker compose -f docker-compose.build.yml up -d --build
 Database adalah satu file SQLite: `./serverdeck-data/serverdeck.db` di host.
 
 ```bash
-# Buka lewat container (sqlite3 sudah ada di image)
-docker exec -it serverdeck sqlite3 /data/serverdeck.db
+# Interaktif lewat SSH biasa (sqlite3 sudah ada di image)
+docker exec -it serverdeck sqlite3 -readonly /data/serverdeck.db
 
 sqlite> .tables
 sqlite> SELECT host, port, username, datetime(last_used_at/1000, 'unixepoch') FROM connections;
 sqlite> SELECT name, updated_at FROM pipelines;
 sqlite> .quit
 ```
+
+Dari terminal bawah ServerDeck (tidak interaktif, tanpa TTY), jalankan satu query per perintah **tanpa `-it`**:
+
+```bash
+docker exec serverdeck sqlite3 -readonly -header -column /data/serverdeck.db "SELECT host, username FROM connections;"
+```
+
+Atau pakai **Docker → container serverdeck → Console**, lalu jalankan `sqlite3 -readonly /data/serverdeck.db` untuk mode interaktif.
 
 - **Aplikasi desktop:** unduh backup dari halaman **Data → Unduh backup** (atau salin file dari folder `serverdeck-data`), lalu buka dengan *DB Browser for SQLite*, DBeaver, atau TablePlus.
 - **Backup rutin:** salin folder `serverdeck-data` beserta nilai `SECURITY_SECRET`-nya. Tanpa kunci yang sama, password tersimpan tidak bisa dipakai di mesin lain.
