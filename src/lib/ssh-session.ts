@@ -20,6 +20,8 @@ export interface SSHSessionInfo {
   homeDir: string;
   /** Cara memanggil Docker di server ini ('docker' atau 'sudo -n docker'), diisi saat pertama dipakai. */
   dockerPrefix?: string;
+  /** PATH dari login shell user; dipakai perintah non-interaktif (terminal lama, pipeline). */
+  loginPath?: string;
 }
 
 export interface ExecOptions {
@@ -313,6 +315,25 @@ export class SSHManager {
       if (!session.sftp) return resolve('/');
       session.sftp.realpath('.', (err, absPath) => resolve(err || !absPath ? '/' : absPath.replace(/\\/g, '/')));
     });
+
+    if (session.platform === 'unix') session.loginPath = await this.detectLoginPath(session);
+  }
+
+  /**
+   * `exec` SSH menjalankan shell non-login: ~/.bash_profile dan ~/.bashrc tidak
+   * dibaca, sehingga program yang dipasang lewat npm global, nvm, pipx, dsb.
+   * "command not found". Ambil PATH dari login shell user sekali saat konek.
+   */
+  private static async detectLoginPath(session: SSHSessionInfo): Promise<string | undefined> {
+    const probe = (flags: string) =>
+      `S="\${SHELL:-/bin/sh}"; case "$S" in */fish|*/nu) S=/bin/sh;; esac; "$S" ${flags} 'printf "__SDPATH__%s__SDEND__" "$PATH"' 2>/dev/null </dev/null`;
+    // -i ikut: banyak installer (nvm, bun) menulis PATH di ~/.bashrc yang hanya dibaca shell interaktif.
+    for (const flags of ['-lic', '-lc']) {
+      const res = await this.execCommand(session.id, probe(flags), 10_000).catch(() => null);
+      const found = res?.stdout.match(/__SDPATH__([^\n\0]*?)__SDEND__(?![\s\S]*__SDPATH__)/)?.[1];
+      if (found && found.includes('/') && found.length < 8192) return found;
+    }
+    return undefined;
   }
 
   /** Membungkus perintah dengan folder kerja dan penanganan sudo sesuai shell. */
@@ -327,6 +348,8 @@ export class SSHManager {
     }
 
     const parts: string[] = [];
+    // PATH login shell user (npm global, nvm, ~/.local/bin, ...), seperti saat SSH biasa.
+    if (session.loginPath) parts.push(`export PATH=${shellQuote(session.loginPath)}`);
     if (options.sudo === 'password') parts.push(SUDO_ASKPASS_PREFIX);
     if (options.sudo === 'nonInteractive') parts.push(SUDO_NONINTERACTIVE_PREFIX);
     parts.push(cwd ? `cd ${shellQuote(cwd)} && ${command}` : command);
@@ -363,6 +386,18 @@ export class SSHManager {
       : {};
     return new Promise((resolve, reject) => {
       session.client.exec(command, execOptions, (err, stream) => (err ? reject(err) : resolve(stream)));
+    });
+  }
+
+  /**
+   * Shell interaktif sungguhan (seperti `ssh user@host`): login shell dengan PTY,
+   * jadi PATH, alias, prompt, wizard interaktif, vim, dan top berjalan normal.
+   */
+  static openShell(sessionId: string, size: { cols: number; rows: number }): Promise<ClientChannel> {
+    const session = this.getSession(sessionId);
+    if (!session) throw new Error('No active SSH session');
+    return new Promise((resolve, reject) => {
+      session.client.shell({ term: 'xterm-256color', cols: size.cols, rows: size.rows }, (err, stream) => (err ? reject(err) : resolve(stream)));
     });
   }
 

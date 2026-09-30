@@ -46,7 +46,20 @@ export async function openConsole(
   const channel = await SSHManager.openChannel(sessionId, command, {
     pty: { cols: clamp(options.cols, 20, 500, 120), rows: clamp(options.rows, 5, 200, 32) },
   });
+  return registerConsole(sessionId, channel);
+}
 
+/** Shell interaktif ke server itu sendiri (terminal bawah ServerDeck). */
+export async function openHostShell(sessionId: string, options: { cols?: number; rows?: number }): Promise<string> {
+  const channel = await SSHManager.openShell(sessionId, {
+    cols: clamp(options.cols, 20, 500, 120),
+    rows: clamp(options.rows, 5, 200, 32),
+  });
+  return registerConsole(sessionId, channel);
+}
+
+/** Daftarkan kanal PTY supaya bisa dibaca (stream) dan ditulis (input) dari browser. */
+function registerConsole(sessionId: string, channel: ClientChannel): string {
   const consoleId = randomBytes(16).toString('hex');
   const entry: ConsoleSession = {
     id: consoleId, sessionId, channel, pending: [], pendingBytes: 0, sink: null, closed: false, createdAt: Date.now(),

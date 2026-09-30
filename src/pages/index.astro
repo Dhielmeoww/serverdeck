@@ -7,6 +7,8 @@ import DockerView from '../components/DockerView.astro';
 import DataView from '../components/DataView.astro';
 import { storageMode } from '../lib/config';
 import { loginEnabled } from '../lib/app-auth';
+// Terminal bawah memakai xterm.js (CSS harus di-import statis agar ikut di-bundle).
+import '@xterm/xterm/css/xterm.css';
 
 export const prerender = false;
 
@@ -350,7 +352,9 @@ const permRows = [
             ))}
           </div>
           <div class="ml-auto flex items-center gap-1">
-            <button type="button" id="btn-term-open-folder" class="h-7 rounded-md px-2 text-[12px] text-slate-400 transition hover:bg-slate-800 hover:text-slate-100" title="Buka folder terminal di File Manager">Buka folder</button>
+            <span id="term-status" class="mr-1 hidden text-[12px] text-slate-500 sm:inline"></span>
+            <button type="button" id="btn-term-reconnect" class="hidden h-7 rounded-md bg-brand-600 px-2.5 text-[12px] font-medium text-white transition hover:bg-brand-700">Sambungkan lagi</button>
+            <button type="button" id="btn-term-cd" class="h-7 rounded-md px-2 text-[12px] text-slate-400 transition hover:bg-slate-800 hover:text-slate-100" title="Pindah (cd) ke folder yang dibuka di File Manager">cd ke folder ini</button>
             <button type="button" id="btn-clear-terminal" class="h-7 rounded-md px-2 text-[12px] text-slate-400 transition hover:bg-slate-800 hover:text-slate-100">Clear</button>
             <button type="button" id="btn-close-terminal" class="inline-flex size-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-800 hover:text-slate-100" aria-label="Tutup terminal">
               <Icon name="chevronDown" size={16} />
@@ -358,13 +362,9 @@ const permRows = [
           </div>
         </div>
 
-        <div id="terminal-output" class="terminal-scroll flex-1 select-text space-y-1.5 overflow-y-auto p-4 font-mono text-[12px] leading-relaxed text-slate-300">
-          <div class="text-slate-500">Ketik perintah lalu tekan Enter. Perintah dijalankan di folder yang sedang dibuka.</div>
-        </div>
-
-        <div class="flex h-11 shrink-0 items-center gap-2 border-t border-slate-800 px-4">
-          <span id="term-prompt" class="max-w-[50%] shrink-0 truncate font-mono text-[12px] font-semibold text-brand-300">{userHost ? `${userHost}:$` : "$"}</span>
-          <input type="text" id="term-input" placeholder="ls -la" autocomplete="off" spellcheck="false" class="w-full bg-transparent font-mono text-[12px] text-slate-100 placeholder:text-slate-600 focus:outline-none" />
+        <!-- Shell interaktif sungguhan (PTY), seperti membuka SSH biasa. -->
+        <div class="min-h-0 flex-1 bg-[#020617] px-2 pt-2">
+          <div id="host-terminal" class="h-full"></div>
         </div>
       </div>
     </div>
@@ -509,8 +509,6 @@ const permRows = [
   let fileList = [];
   let showHidden = false;
   let activeAuthType = 'password';
-  const cmdHistory = [];
-  let cmdHistoryIndex = -1;
   let currentEditorPath = '';
   let originalFileContent = '';
   let itemToChmod = null;
@@ -528,7 +526,6 @@ const permRows = [
   const terminalDrawer = $('terminal-drawer');
   const appSidebar = $('app-sidebar');
   const sidebarBackdrop = $('sidebar-backdrop');
-  const termInput = $('term-input');
   const editorContent = $('editor-content');
 
   function escapeHtml(value) {
@@ -606,14 +603,10 @@ const permRows = [
   }
 
   // ---------- Views ----------
-  let termUser = '';
-
   function setUserHost(username, host) {
     const label = `${username}@${host}`;
     $('header-user-host').textContent = label;
     $('sidebar-user-host').textContent = label;
-    termUser = label;
-    updatePrompt();
     // Judul tab menunjukkan server, supaya tidak salah tab saat membuka banyak server.
     document.title = `${label} · ServerDeck`;
   }
@@ -683,6 +676,8 @@ const permRows = [
 
   function switchToUnauthView() {
     sshSession.clear();
+    // Modul terminal menutup shell interaktifnya.
+    window.dispatchEvent(new CustomEvent('app:ssh-closed'));
     document.title = 'ServerDeck';
     appShell.classList.add('hidden');
     unauthView.classList.remove('hidden');
@@ -912,15 +907,11 @@ const permRows = [
 
   // ---------- Directory ----------
   async function loadDirectory(path) {
-    const previousPath = currentPath;
     currentPath = path.replace(/\\/g, '/').replace(/\/+/g, '/');
     if (!currentPath.startsWith('/')) currentPath = '/' + currentPath;
     if (currentPath.length > 1) currentPath = currentPath.replace(/\/$/, '');
-    // Pindah folder di File Manager memindahkan terminal juga (muat ulang folder yang sama tidak).
-    if (currentPath !== previousPath || !termCwd) {
-      termCwd = currentPath;
-      updatePrompt();
-    }
+    // Dipakai tombol "cd ke folder ini" di terminal.
+    appContainer.dataset.path = currentPath;
 
     const spinner = $('table-loading-spinner');
     spinner.classList.remove('hidden');
@@ -1422,112 +1413,19 @@ const permRows = [
   });
 
   // ---------- Terminal ----------
+  // Shell interaktif (xterm.js + PTY) ada di modul host-terminal; di sini hanya
+  // membuka/menutup laci dan memberi tahu modul itu lewat event.
   let isTerminalOpen = false;
-  // Folder terminal: mengikuti File Manager, lalu berubah sendiri bila ada `cd`.
-  let termCwd = null;
-
-  function shortPath(path) {
-    const home = appContainer.dataset.initialHome || '';
-    if (home && home !== '/' && (path === home || path.startsWith(home + '/'))) return '~' + path.slice(home.length);
-    return path;
-  }
-
-  function promptText() {
-    return `${termUser ? `${termUser}:` : ''}${shortPath(termCwd || currentPath)}$`;
-  }
-
-  function updatePrompt() {
-    $('term-prompt').textContent = promptText();
-    $('term-prompt').title = termCwd || currentPath;
-  }
-
-  $('btn-term-open-folder').addEventListener('click', () => window.openInFiles(termCwd || currentPath));
 
   function setTerminal(open) {
     isTerminalOpen = open;
     terminalDrawer.classList.toggle('translate-y-full', !open);
-    if (open) termInput.focus();
+    window.dispatchEvent(new CustomEvent('app:terminal', { detail: { open } }));
   }
   function closeTerminal() { setTerminal(false); }
 
   $('btn-toggle-terminal').addEventListener('click', () => setTerminal(!isTerminalOpen));
   $('btn-close-terminal').addEventListener('click', closeTerminal);
-  $('btn-clear-terminal').addEventListener('click', () => { $('terminal-output').innerHTML = ''; });
-
-  termInput.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') {
-      const cmd = termInput.value.trim();
-      if (!cmd) return;
-      cmdHistory.push(cmd);
-      cmdHistoryIndex = cmdHistory.length;
-      termInput.value = '';
-      await executeRemoteCommand(cmd);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (cmdHistoryIndex > 0) termInput.value = cmdHistory[--cmdHistoryIndex] || '';
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (cmdHistoryIndex < cmdHistory.length - 1) {
-        termInput.value = cmdHistory[++cmdHistoryIndex] || '';
-      } else {
-        cmdHistoryIndex = cmdHistory.length;
-        termInput.value = '';
-      }
-    }
-  });
-
-  document.querySelectorAll('.quick-cmd-btn').forEach((btn) => {
-    btn.addEventListener('click', () => executeRemoteCommand(btn.dataset.cmd));
-  });
-
-  function termLine(text, className, tag = 'div') {
-    const el = document.createElement(tag);
-    el.className = className;
-    el.textContent = text;
-    $('terminal-output').appendChild(el);
-    return el;
-  }
-
-  async function executeRemoteCommand(cmd) {
-    const output = $('terminal-output');
-    if (cmd === 'clear' || cmd === 'cls') {
-      output.innerHTML = '';
-      return;
-    }
-    termLine(`${promptText()} ${cmd}`, 'font-semibold text-brand-300');
-    const running = termLine('Menjalankan…', 'animate-pulse text-slate-500');
-    output.scrollTop = output.scrollHeight;
-
-    try {
-      const res = await fetch('/api/exec', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // Tiap perintah adalah sesi shell baru; trackCwd membuat server melaporkan
-        // folder terakhir sehingga `cd` berlaku untuk perintah berikutnya.
-        // sudo -n: gagal cepat bila sudo minta password, bukan menggantung.
-        body: JSON.stringify({ command: cmd, cwd: termCwd || currentPath, sudo: 'nonInteractive', trackCwd: true }),
-      });
-      const data = await res.json();
-      running.remove();
-
-      if (!res.ok) throw new Error(data.error || `Request gagal (${res.status})`);
-      if (data.cwd && data.cwd !== termCwd) {
-        termCwd = data.cwd;
-        updatePrompt();
-      }
-      if (data.stdout) termLine(data.stdout, 'whitespace-pre-wrap text-slate-200', 'pre');
-      if (data.stderr) termLine(data.stderr, 'whitespace-pre-wrap text-red-400', 'pre');
-      if (/sudo: (a )?password is required|sudo: a terminal is required/i.test(data.stderr || '')) {
-        termLine('Terminal ini tidak interaktif sehingga sudo tidak bisa meminta password. Jalankan lewat Pipeline (password sudo diminta saat run) atau atur NOPASSWD di sudoers.', 'text-amber-400');
-      }
-      if (data.exitCode !== 0 && !data.stderr && !data.stdout) termLine(`Exit code: ${data.exitCode}`, 'text-amber-400');
-    } catch (err) {
-      running.remove();
-      termLine(`Error: ${err.message}`, 'text-red-400');
-    }
-
-    output.scrollTop = output.scrollHeight;
-  }
 
   // ---------- Start ----------
   // Tab ini sudah punya sesi SSH (mis. setelah refresh)? Lanjutkan; bila tidak, tampilkan login.
@@ -1551,4 +1449,9 @@ const permRows = [
     }
   }
   boot();
+</script>
+
+<script>
+  // Shell interaktif (PTY) untuk laci terminal.
+  import '../lib/host-terminal';
 </script>

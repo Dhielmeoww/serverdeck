@@ -597,10 +597,15 @@ function setDetailTab(next: DetailTab) {
   if (next === 'stats') stopStats = startStats(detail.Id, $('dk-stats'), running);
   if (next === 'console') {
     if (!consoleCtl) {
+      const containerId = detail.Id;
       consoleCtl = createConsole(
-        detail.Id,
+        () => ({
+          action: 'open',
+          container: containerId,
+          shell: $<HTMLSelectElement>('dk-console-shell').value,
+          user: $<HTMLInputElement>('dk-console-user').value.trim(),
+        }),
         $('dk-console-term'),
-        () => ({ shell: $<HTMLSelectElement>('dk-console-shell').value, user: $<HTMLInputElement>('dk-console-user').value.trim() }),
         renderConsoleStatus,
       );
       renderConsoleStatus('idle');

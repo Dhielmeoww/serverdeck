@@ -1,10 +1,14 @@
 /**
- * Tab Console: terminal interaktif ke dalam container (docker exec -it).
- * xterm.js baru dimuat saat konsol pertama kali dibuka.
+ * Terminal interaktif di browser (xterm.js + PTY lewat SSH). Dipakai untuk
+ * console Docker (docker exec -it) dan terminal server (shell seperti ssh).
+ * xterm.js baru dimuat saat terminal pertama kali dibuka.
  */
 import { api } from '../client';
 
-type Status = 'idle' | 'connecting' | 'connected' | 'closed';
+export type Status = 'idle' | 'connecting' | 'connected' | 'closed';
+
+/** Payload pembuka sesi untuk /api/console (tanpa cols/rows, diisi otomatis). */
+export type OpenPayload = { action: 'open'; container: string; shell: string; user: string } | { action: 'open-shell' };
 
 export interface ConsoleController {
   connect(): Promise<void>;
@@ -13,13 +17,17 @@ export interface ConsoleController {
   refit(): void;
   /** Tutup sesi dan lepas terminal (saat meninggalkan halaman detail). */
   dispose(): void;
+  /** Kirim teks seolah diketik (mis. "cd /var/www\r"). */
+  send(data: string): void;
+  /** Bersihkan layar di browser. */
+  clear(): void;
+  focus(): void;
   readonly status: Status;
 }
 
 export function createConsole(
-  containerId: string,
+  getPayload: () => OpenPayload,
   el: HTMLElement,
-  getOptions: () => { shell: string; user: string },
   onStatus: (status: Status, message?: string) => void,
 ): ConsoleController {
   let term: import('@xterm/xterm').Terminal | null = null;
@@ -35,6 +43,29 @@ export function createConsole(
     status = s;
     onStatus(s, message);
   };
+
+  // Input dikirim berurutan; ketikan cepat digabung dalam satu permintaan.
+  let queue = '';
+  let sending = false;
+  const flush = async () => {
+    if (sending || !queue || !consoleId) return;
+    sending = true;
+    const data = queue;
+    queue = '';
+    try {
+      await api('/api/console', { action: 'input', console: consoleId, data });
+    } catch {
+      // sesi berakhir; ditangani oleh pembaca stream
+    }
+    sending = false;
+    if (queue) flush();
+  };
+
+  function send(data: string) {
+    if (status !== 'connected') return;
+    queue += data;
+    flush();
+  }
 
   async function ensureTerminal() {
     if (term) return;
@@ -52,27 +83,7 @@ export function createConsole(
     term.open(el);
     fit.fit();
 
-    // Input dikirim berurutan; ketikan cepat digabung dalam satu permintaan.
-    let queue = '';
-    let sending = false;
-    const flush = async () => {
-      if (sending || !queue || !consoleId) return;
-      sending = true;
-      const data = queue;
-      queue = '';
-      try {
-        await api('/api/docker/console', { action: 'input', console: consoleId, data });
-      } catch {
-        // sesi berakhir; ditangani oleh pembaca stream
-      }
-      sending = false;
-      if (queue) flush();
-    };
-    term.onData((data) => {
-      if (status !== 'connected') return;
-      queue += data;
-      flush();
-    });
+    term.onData(send);
 
     observer = new ResizeObserver(() => {
       window.clearTimeout(resizeTimer);
@@ -85,7 +96,7 @@ export function createConsole(
     if (!term || !fit || el.offsetParent === null) return;
     fit.fit();
     if (consoleId && status === 'connected') {
-      api('/api/docker/console', { action: 'resize', console: consoleId, cols: term.cols, rows: term.rows }).catch(() => {});
+      api('/api/console', { action: 'resize', console: consoleId, cols: term.cols, rows: term.rows }).catch(() => {});
     }
   }
 
@@ -96,14 +107,11 @@ export function createConsole(
       await ensureTerminal();
       term!.reset();
       fit!.fit();
-      const { shell, user } = getOptions();
-      const opened = await api<{ console: string }>('/api/docker/console', {
-        action: 'open', container: containerId, shell, user, cols: term!.cols, rows: term!.rows,
-      });
+      const opened = await api<{ console: string }>('/api/console', { ...getPayload(), cols: term!.cols, rows: term!.rows });
       consoleId = opened.console;
 
       abort = new AbortController();
-      const res = await fetch(`/api/docker/console?console=${encodeURIComponent(consoleId)}`, { signal: abort.signal });
+      const res = await fetch(`/api/console?console=${encodeURIComponent(consoleId)}`, { signal: abort.signal });
       if (!res.ok || !res.body) throw new Error(`Gagal membuka stream konsol (${res.status})`);
       reader = res.body.getReader();
       setStatus('connected');
@@ -133,7 +141,7 @@ export function createConsole(
   function disconnect() {
     const id = consoleId;
     abort?.abort();
-    if (id) api('/api/docker/console', { action: 'close', console: id }).catch(() => {});
+    if (id) api('/api/console', { action: 'close', console: id }).catch(() => {});
   }
 
   function dispose() {
@@ -151,6 +159,9 @@ export function createConsole(
     disconnect,
     refit,
     dispose,
+    send,
+    clear: () => term?.clear(),
+    focus: () => term?.focus(),
     get status() {
       return status;
     },
