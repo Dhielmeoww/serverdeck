@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { SSHManager } from '../../../lib/ssh-session';
-import { getSessionId, clearSessionCookie } from '../../../lib/auth-cookie';
+import { getSessionId, clearLegacySessionCookie } from '../../../lib/auth-cookie';
 
 export const prerender = false;
 
@@ -9,7 +9,7 @@ export const POST: APIRoute = async (context) => {
   if (sessionId) {
     SSHManager.closeSession(sessionId);
   }
-  clearSessionCookie(context);
+  clearLegacySessionCookie(context);
 
   return new Response(JSON.stringify({ success: true }), {
     status: 200,

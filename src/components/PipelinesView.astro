@@ -33,12 +33,14 @@ import Icon from './Icon.astro';
 
     <div class="mb-5 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
       <Icon name="lock" size={16} class="mt-0.5 shrink-0 text-slate-500" />
-      <p class="text-[12.5px] leading-relaxed text-slate-600">
+      <p id="pl-storage-note" class="text-[12.5px] leading-relaxed text-slate-600">
         Pipeline, variabel, dan riwayat run hanya disimpan di <span class="font-medium text-slate-800">localStorage browser ini</span>, tidak di server ServerDeck.
         Perintah baru dikirim ke server SSH tujuan saat pipeline dijalankan. Hindari menyimpan password di variabel.
         <span id="pl-storage-size" class="text-slate-400"></span>
       </p>
     </div>
+
+    <div id="pl-migrate" class="mb-5 hidden flex-wrap items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3"></div>
 
     <div id="pl-grid" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"></div>
   </div>
@@ -395,14 +397,17 @@ import Icon from './Icon.astro';
   } from '../lib/client';
   import {
     CONDITION_LABELS, PipelineRun, STEP_TYPES, TEMPLATES,
-    conditionText, exportPipeline, findUnknownVariables, importPipelines, loadPipelines,
-    newStep, recordRun, savePipelines, stepSummary, storageBytes, uid, usesSudo,
+    browserPipelineCount, conditionText, exportPipeline, fetchPipelines, findUnknownVariables, importPipelines,
+    migrateBrowserPipelines, newStep, recordRun, removeStoredPipeline, stepSummary, storageBytes, storeManyPipelines,
+    storeMode, storePipeline, uid, usesSudo,
     type ConditionCheck, type Pipeline, type RunRecord, type RunStatus, type Step, type StepResult, type StepStatus, type StepType,
   } from '../lib/pipelines';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-  let pipelines: Pipeline[] = loadPipelines();
+  const DB_MODE = storeMode() === 'database';
+  let pipelines: Pipeline[] = [];
+  let pipelinesLoaded = false;
   let editingId: string | null = null;
   let selectedStepId: string | null = null;
   let panelTab: 'step' | 'vars' | 'runs' = 'step';
@@ -416,19 +421,27 @@ import Icon from './Icon.astro';
 
   // ---------- Penyimpanan ----------
   let saveTimer: number | undefined;
-  function persist(immediate = false) {
-    const p = editing();
-    if (p) p.updatedAt = Date.now();
+  const SAVED_LABEL = DB_MODE ? 'Tersimpan di database' : 'Tersimpan di browser';
+
+  /** Simpan `target` (bawaan: pipeline yang sedang diedit) ke browser atau database. */
+  function persist(immediate = false, target: Pipeline | null = editing()) {
+    if (!target) return;
+    target.updatedAt = Date.now();
     window.clearTimeout(saveTimer);
-    const write = () => {
-      if (!savePipelines(pipelines)) toast('Penyimpanan browser penuh. Hapus riwayat run atau pipeline lama.', 'error');
-      const saved = $('pl-saved');
-      if (saved) saved.textContent = 'Tersimpan di browser';
+    const write = async () => {
+      try {
+        await storePipeline(pipelines, target);
+        const saved = $('pl-saved');
+        if (saved && editingId === target.id) saved.textContent = SAVED_LABEL;
+      } catch (err: any) {
+        toast(`Gagal menyimpan: ${err.message}`, 'error', 6000);
+        if (editingId === target.id) $('pl-saved').textContent = 'Belum tersimpan';
+      }
     };
     if (immediate) write();
     else {
       $('pl-saved').textContent = 'Menyimpan…';
-      saveTimer = window.setTimeout(write, 300);
+      saveTimer = window.setTimeout(write, DB_MODE ? 600 : 300);
     }
   }
 
@@ -496,8 +509,17 @@ import Icon from './Icon.astro';
 
   function renderList() {
     const grid = $('pl-grid');
-    const size = storageBytes();
-    $('pl-storage-size').textContent = size ? ` Terpakai ${formatBytes(size)}.` : '';
+    if (DB_MODE) {
+      $('pl-storage-note').innerHTML = 'Pipeline, variabel, dan riwayat run disimpan di <span class="font-medium text-slate-800">database ServerDeck</span> di server milikmu sendiri (lihat halaman Data). Variabel dienkripsi AES-256. Perintah hanya dikirim ke server SSH tujuan saat pipeline dijalankan.';
+      renderMigrateBanner();
+    } else {
+      const size = storageBytes();
+      $('pl-storage-size').textContent = size ? ` Terpakai ${formatBytes(size)}.` : '';
+    }
+    if (!pipelinesLoaded) {
+      grid.innerHTML = `<div class="col-span-full flex items-center justify-center gap-2 py-16 text-[13px] text-slate-500">${spinner('size-4 text-brand-600')}Memuat pipeline…</div>`;
+      return;
+    }
 
     if (!pipelines.length) {
       grid.innerHTML = `
@@ -562,7 +584,7 @@ import Icon from './Icon.astro';
       const copy: Pipeline = { ...structuredClone(p), id: uid(), name: `${p.name} (salinan)`, runs: [], createdAt: Date.now(), updatedAt: Date.now() };
       copy.steps.forEach((s) => (s.id = uid()));
       pipelines.push(copy);
-      persist(true);
+      persist(true, copy);
       renderList();
       toast('Pipeline diduplikat', 'success');
     }
@@ -575,7 +597,11 @@ import Icon from './Icon.astro';
     const ok = await confirmAction({ title: `Hapus '${p.name}'?`, message: 'Pipeline dan riwayat run-nya dihapus dari browser ini.', okText: 'Hapus' });
     if (!ok) return;
     pipelines = pipelines.filter((x) => x.id !== p.id);
-    persist(true);
+    try {
+      await removeStoredPipeline(pipelines, p.id);
+    } catch (err: any) {
+      toast(`Gagal menghapus: ${err.message}`, 'error');
+    }
     if (editingId === p.id) closeEditor();
     renderList();
     toast('Pipeline dihapus', 'info');
@@ -691,7 +717,7 @@ import Icon from './Icon.astro';
     if (!template) return;
     const p = template.create();
     pipelines.push(p);
-    persist(true);
+    persist(true, p);
     closeDialog(templateDialog);
     openEditor(p.id);
     selectedStepId = p.steps[0]?.id || null;
@@ -718,7 +744,7 @@ import Icon from './Icon.astro';
       const imported = importPipelines(await file.text());
       if (!imported.length) throw new Error('Tidak ada pipeline di file ini');
       pipelines.push(...imported);
-      persist(true);
+      await storeManyPipelines(pipelines, imported);
       renderList();
       toast(`${imported.length} pipeline diimpor`, 'success');
     } catch (err: any) {
@@ -1259,7 +1285,7 @@ import Icon from './Icon.astro';
     const target = pipelines.find((x) => x.id === p.id);
     if (target) {
       recordRun(target, record);
-      persist(true);
+      persist(true, target);
     }
     if (editingId === p.id) {
       shownRun = record;
@@ -1272,17 +1298,56 @@ import Icon from './Icon.astro';
   }
 
   // ---------- Mulai ----------
-  onView('pipelines', () => {
+  onView('pipelines', async () => {
+    if (!pipelinesLoaded) {
+      renderList();
+      await ensureLoaded();
+    }
     if (editingId) renderEditor();
     else renderList();
   });
 
-  // Perubahan dari tab lain di browser yang sama.
-  window.addEventListener('storage', (e) => {
-    if (e.key !== 'serverdeck.pipelines.v1' || isRunning()) return;
-    pipelines = loadPipelines();
+  // Mode browser: perubahan dari tab lain di browser yang sama.
+  window.addEventListener('storage', async (e) => {
+    if (DB_MODE || e.key !== 'serverdeck.pipelines.v1' || isRunning()) return;
+    pipelines = await fetchPipelines();
     if (editingId && !editing()) closeEditor();
     else if (editingId) openEditor(editingId);
     else renderList();
   });
+
+  // ---------- Pindah dari browser ke database ----------
+  function renderMigrateBanner() {
+    const el = $('pl-migrate');
+    const count = DB_MODE ? browserPipelineCount() : 0;
+    el.classList.toggle('hidden', !count);
+    el.classList.toggle('flex', Boolean(count));
+    if (!count) return;
+    el.innerHTML = `
+      <p class="min-w-0 flex-1 text-[13px] text-slate-700">Ada <b>${count} pipeline</b> tersimpan di browser ini dari mode sebelumnya. Pindahkan ke database supaya bisa dipakai dari browser lain.</p>
+      <button type="button" data-migrate class="btn-primary h-8 px-3">Pindahkan ke database</button>`;
+  }
+
+  $('pl-migrate').addEventListener('click', async (e) => {
+    if (!(e.target as HTMLElement).closest('[data-migrate]')) return;
+    try {
+      const moved = await migrateBrowserPipelines();
+      pipelines = await fetchPipelines();
+      toast(`${moved} pipeline dipindahkan ke database`, 'success');
+      renderList();
+    } catch (err: any) {
+      toast(`Gagal memindahkan: ${err.message}`, 'error');
+    }
+  });
+
+  async function ensureLoaded() {
+    if (pipelinesLoaded) return;
+    try {
+      pipelines = await fetchPipelines();
+      pipelinesLoaded = true;
+    } catch (err: any) {
+      toast(`Gagal memuat pipeline: ${err.message}`, 'error', 6000);
+      pipelinesLoaded = true;
+    }
+  }
 </script>

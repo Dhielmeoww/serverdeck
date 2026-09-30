@@ -37,3 +37,10 @@ docker-compose.yml
 Dockerfile
 .github
 scripts
+
+# Database lokal (STORAGE_MODE=database)
+data/
+serverdeck-data/
+*.db
+*.db-wal
+*.db-shm

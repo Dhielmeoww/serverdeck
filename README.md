@@ -14,8 +14,11 @@ Satu container. Tanpa database. Tanpa agent di server tujuan. Cukup SSH.
 
 Panel server biasanya meminta imbalan: database untuk menyimpan kredensial, agent yang harus dipasang di setiap server, atau akun cloud yang menyimpan semua konfigurasi kamu. ServerDeck memilih jalan sebaliknya.
 
-- **Nol penyimpanan di server.** ServerDeck tidak punya database dan tidak menulis kredensial, pipeline, maupun riwayat ke disk. Container-nya bahkan tidak butuh volume.
-- **Data kembali ke browser masing-masing.** Pipeline, variabel, riwayat run, dan daftar server tersimpan di browser pengguna sendiri. Setiap orang memegang datanya sendiri. Tidak ada yang bisa diintip dari server, karena memang tidak ada yang disimpan di sana.
+- **Data tetap milikmu, kamu yang pilih tempatnya.**
+  - Mode **browser**: semua tersimpan di browser masing-masing, tanpa database dan tanpa volume.
+  - Mode **database**: pipeline dan koneksi tersimpan di satu file SQLite **di server milikmu sendiri**, dengan password terenkripsi AES-256.
+  - Di kedua mode, tidak ada yang dikirim ke pihak ketiga, termasuk ke pembuat ServerDeck.
+- **Banyak server sekaligus.** Satu tab satu server: tab 1 ke server A, tab 2 ke server B, dan seterusnya, tanpa saling tertukar.
 - **Tanpa agent.** Server tujuan cukup punya SSH. Tidak ada yang perlu di-install di sana.
 - **Siap dalam satu perintah.** `docker compose up -d`, buka browser, selesai.
 - **Linux dan Windows.** Mendukung OpenSSH di Linux, dan OpenSSH Server Windows dengan shell cmd.exe atau PowerShell.
@@ -65,25 +68,34 @@ Kelola Docker di server lewat SSH, tanpa memasang apa pun di server:
 ### 📊 Storage
 Kapasitas setiap disk dengan status *Normal / Hampir penuh / Kritis*, pembagian pemakaian per folder yang bisa ditelusuri sampai ke sumbernya, dan pencarian file terbesar. Kamu langsung tahu apa yang memenuhi disk.
 
+### 🗂️ Multi-server
+Setiap tab browser punya sesi SSH sendiri. Buka tab baru untuk server lain; judul tab menunjukkan `user@host` supaya tidak tertukar. Disconnect di satu tab tidak memengaruhi tab lain.
+
+### 🗄️ Data (mode database)
+Halaman **Data** menampilkan isi database: koneksi tersimpan (tanpa pernah menampilkan password), pipeline, ukuran file, dan status kunci enkripsi. Hapus password tersimpan atau koneksi, dan unduh backup dengan satu klik.
+
 ---
 
 ## Privasi & keamanan data
 
-ServerDeck dirancang supaya **tidak ada data yang perlu dipercayakan ke server aplikasi**:
+Kamu memilih di mana data disimpan lewat `STORAGE_MODE`. **Di kedua mode, data tidak pernah meninggalkan mesin milikmu.**
 
-| Data | Disimpan di | Keterangan |
+| Data | `STORAGE_MODE=browser` (bawaan) | `STORAGE_MODE=database` |
 |---|---|---|
-| Pipeline, variabel, riwayat run | `localStorage` browser kamu | Tidak pernah dikirim untuk disimpan. Backup dengan Ekspor JSON. |
-| Daftar server tersimpan | `localStorage` browser kamu | Hanya host, port, dan username. **Password tidak ikut.** |
-| Password / private key SSH | **Tidak disimpan** | Dipakai untuk membuka koneksi, tidak ditulis ke disk atau database. |
-| Password sudo | Memori browser selama run | Dikirim lewat stdin, dibuang begitu run selesai. |
-| Sesi SSH aktif | Memori proses ServerDeck | Hilang saat disconnect, logout, restart, atau setelah 1 jam tidak aktif. |
-| Login web | Cookie bertanda tangan (HMAC) | Tanpa tabel sesi. Mengganti password otomatis membatalkan semua login lama. |
+| Pipeline, variabel, riwayat run | `localStorage` browser | SQLite di server ServerDeck. Variabel **terenkripsi AES-256-GCM**. |
+| Koneksi tersimpan | `localStorage`: host, port, username saja | SQLite: host, port, username + **password/private key terenkripsi** (hanya bila login web aktif) |
+| Password SSH yang tersimpan | Tidak disimpan | Dibuka hanya oleh server saat konek. **Tidak pernah dikirim balik ke browser.** |
+| Password sudo | Memori browser selama run | Memori browser selama run (tidak pernah disimpan) |
+| Sesi SSH aktif | Memori proses ServerDeck, per tab | Memori proses ServerDeck, per tab |
+| Login web | Cookie bertanda tangan (HMAC) | Cookie bertanda tangan (HMAC) |
+
+**Kenapa dienkripsi, bukan di-hash?** Hash itu satu arah dan cocok untuk *mengecek* password. Password SSH perlu *dipakai ulang* untuk login ke server, jadi disimpan terenkripsi dengan kunci `SECURITY_SECRET`. Tanpa kunci itu, isi database (termasuk file backup) tidak bisa dibaca.
 
 Lapisan pengaman lainnya:
 - **Login web opsional** sebelum login SSH (`SECURITY_ENABLELOGIN`). Setelah 5 percobaan gagal, login dikunci 5 menit.
 - Cookie `HttpOnly`, `SameSite=Lax`, dan otomatis `Secure` bila diakses lewat HTTPS.
 - **Fail-closed.** Bila login diaktifkan tetapi password belum diatur, semua akses ditolak, bukan dibuka.
+- Password SSH hanya boleh disimpan bila login web aktif, sehingga orang yang sekadar tahu alamat ServerDeck tidak bisa memakai koneksi tersimpan.
 - Container berjalan sebagai user non-root dengan `no-new-privileges`.
 
 > **Yang perlu dipahami:** selama kamu terhubung, proses ServerDeck memegang koneksi SSH ke server tujuan, dan kredensial dikirim dari browser ke ServerDeck saat login. Jadi jalankan ServerDeck di mesin yang kamu percaya, dan **akses lewat HTTPS** bila dibuka di luar jaringan lokal (lihat [Reverse proxy HTTPS](#reverse-proxy-https)).
@@ -105,12 +117,15 @@ services:
     container_name: serverdeck
     ports:
       - '3000:3000'                          # host:container, samakan angka kanan dengan APP_PORT
+    volumes:
+      - ./serverdeck-data:/data              # Database (pipeline, koneksi tersimpan)
     environment:
       - APP_PORT=3000                        # Port aplikasi di dalam container
       - SECURITY_ENABLELOGIN=true            # false = tanpa login web (langsung ke login SSH)
       - SECURITY_USERNAME=admin              # Username login web
       - SECURITY_PASSWORD=ganti-password-ini # Wajib diisi bila login aktif
-      # - SECURITY_SECRET=                   # Opsional: supaya login tetap berlaku setelah restart
+      - SECURITY_SECRET=ganti-string-acak-panjang  # openssl rand -hex 32, jangan diubah setelah dipakai
+      - STORAGE_MODE=database                # atau: browser (tanpa volume)
     restart: unless-stopped
 ```
 
@@ -118,7 +133,9 @@ services:
 docker compose up -d
 ```
 
-Buka `http://localhost:3000`. Perhatikan tidak ada bagian `volumes:`: ServerDeck memang tidak menyimpan apa pun di server.
+Buka `http://localhost:3000`. Database dibuat otomatis di `./serverdeck-data/serverdeck.db` saat pertama kali jalan.
+
+**Tidak mau ada file data sama sekali?** Pakai `STORAGE_MODE=browser` dan hapus bagian `volumes:`. Semua tersimpan di browser masing-masing.
 
 **Ganti port**, misalnya ke 8080: ubah `APP_PORT=8080` dan `ports: - '8080:8080'`. Atau biarkan container di 3000 dan ubah angka kiri saja (`'8080:3000'`).
 
@@ -155,7 +172,27 @@ docker compose -f docker-compose.build.yml up -d --build
 | `SECURITY_ENABLELOGIN` | `true` | `true`: wajib login web sebelum login SSH. `false`: langsung ke login SSH. |
 | `SECURITY_USERNAME` | `admin` | Username login web. |
 | `SECURITY_PASSWORD` | *(kosong)* | Password login web. **Wajib** bila login aktif. Kosong berarti semua akses ditolak. |
-| `SECURITY_SECRET` | *(acak)* | Kunci tanda tangan cookie. Bila kosong, dibuat acak tiap start, sehingga restart membuat semua orang login ulang. |
+| `SECURITY_SECRET` | *(acak)* | Kunci tanda tangan cookie **dan** kunci enkripsi database. Isi string acak panjang dan **jangan diubah** setelah menyimpan password: password tersimpan tidak bisa dibuka dengan kunci lain. Bila kosong, cookie memakai kunci acak tiap start, dan database memakai kunci yang dibuat otomatis di `/data/.secret-key`. |
 | `SECURITY_SESSION_HOURS` | `12` | Masa berlaku login web, dalam jam. |
+| `STORAGE_MODE` | `browser` | `browser`: data di localStorage, tanpa volume. `database`: data di SQLite, butuh volume di `/data`. |
+| `DATA_DIR` | `/data` | Folder database untuk mode database. |
+
+### Mengakses database
+
+Database adalah satu file SQLite: `./serverdeck-data/serverdeck.db` di host.
+
+```bash
+# Buka lewat container (sqlite3 sudah ada di image)
+docker exec -it serverdeck sqlite3 /data/serverdeck.db
+
+sqlite> .tables
+sqlite> SELECT host, port, username, datetime(last_used_at/1000, 'unixepoch') FROM connections;
+sqlite> SELECT name, updated_at FROM pipelines;
+sqlite> .quit
+```
+
+- **Aplikasi desktop:** unduh backup dari halaman **Data → Unduh backup** (atau salin file dari folder `serverdeck-data`), lalu buka dengan *DB Browser for SQLite*, DBeaver, atau TablePlus.
+- **Backup rutin:** salin folder `serverdeck-data` beserta nilai `SECURITY_SECRET`-nya. Tanpa kunci yang sama, password tersimpan tidak bisa dipakai di mesin lain.
+- **Kolom terenkripsi:** `secret_enc`, `passphrase_enc`, dan `variables_enc` berisi data AES-256-GCM, jadi tidak terbaca tanpa kunci.
 
 > Menonaktifkan login (`SECURITY_ENABLELOGIN=false`) berarti siapa pun yang bisa membuka alamat ServerDeck dapat mencoba login SSH. Lakukan ini hanya di jaringan lokal atau di balik autentikasi lain.

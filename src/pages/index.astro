@@ -4,31 +4,18 @@ import Icon from '../components/Icon.astro';
 import PipelinesView from '../components/PipelinesView.astro';
 import StorageView from '../components/StorageView.astro';
 import DockerView from '../components/DockerView.astro';
-import { SSHManager } from '../lib/ssh-session';
-import { getSessionId } from '../lib/auth-cookie';
+import DataView from '../components/DataView.astro';
+import { storageMode } from '../lib/config';
+import { loginEnabled } from '../lib/app-auth';
 
 export const prerender = false;
 
-const sessionId = getSessionId(Astro);
-let initialUser = null;
-let initialSystem = null;
-
-if (sessionId) {
-  const session = SSHManager.getSession(sessionId);
-  if (session) {
-    initialUser = {
-      host: session.host,
-      port: session.port,
-      username: session.username,
-      connectedAt: session.connectedAt,
-    };
-    try {
-      initialSystem = await SSHManager.getSystemInfo(sessionId);
-    } catch {
-      initialSystem = { homeDir: '/' };
-    }
-  }
-}
+// Sesi SSH dipegang per tab (sessionStorage), jadi server tidak tahu tab ini
+// terhubung ke mana saat merender halaman. Script di bawah yang memutuskan.
+const initialUser = null as { username: string; host: string } | null;
+const initialSystem = null as { homeDir?: string; platform?: string; shell?: string; uname?: string } | null;
+const dbMode = storageMode() === 'database';
+const canStoreSecrets = dbMode && loginEnabled();
 
 // Terisi hanya bila SECURITY_ENABLELOGIN=true (lihat middleware.ts).
 const appUser = Astro.locals.appUser;
@@ -49,6 +36,7 @@ const views = [
   { id: 'pipelines', label: 'Pipelines', icon: 'workflow' },
   { id: 'docker', label: 'Docker', icon: 'container' },
   { id: 'storage', label: 'Storage', icon: 'hardDrive' },
+  { id: 'data', label: 'Data', icon: 'database' },
 ] as const;
 
 const quickCommands = [
@@ -72,10 +60,17 @@ const permRows = [
     data-initial-home={initialSystem?.homeDir || '/'}
     data-platform={initialSystem?.platform || 'unix'}
     data-shell={initialSystem?.shell || 'sh'}
+    data-storage={dbMode ? 'database' : 'browser'}
+    data-can-store-secrets={canStoreSecrets ? 'true' : 'false'}
   >
 
+    <!-- Saat memeriksa sesi SSH milik tab ini -->
+    <div id="boot-view" class="flex min-h-screen items-center justify-center bg-slate-50">
+      <span class="size-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent"></span>
+    </div>
+
     <!-- ============ SIGN IN ============ -->
-    <div id="unauth-view" class:list={['min-h-screen items-center justify-center bg-slate-50 px-4 py-10', initialUser ? 'hidden' : 'flex']}>
+    <div id="unauth-view" class="hidden min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
       <div class="w-full max-w-sm">
         <div class="mb-8 text-center">
           <span class="mx-auto mb-5 inline-flex size-12 items-center justify-center rounded-xl bg-brand-600 text-white">
@@ -127,6 +122,10 @@ const permRows = [
                 <Icon name="eye" size={17} />
               </button>
             </div>
+            <p id="saved-secret-hint" class="mt-1.5 hidden items-center gap-1.5 text-[12px] text-emerald-700">
+              <Icon name="lock" size={13} />
+              Password tersimpan terenkripsi. Kosongkan untuk memakainya.
+            </p>
           </div>
 
           <div id="field-private-key" class="hidden flex-col gap-4">
@@ -140,9 +139,20 @@ const permRows = [
             </div>
           </div>
 
-          <label class="flex items-center gap-2 text-[12.5px] text-slate-500">
-            <input type="checkbox" id="checkbox-save-preset" class="size-4 rounded accent-brand-600" checked />
-            Simpan host ini ke riwayat koneksi
+          <label class="flex items-start gap-2 text-[12.5px] text-slate-500">
+            <input type="checkbox" id="checkbox-save-preset" class="mt-0.5 size-4 rounded accent-brand-600" checked />
+            <span>
+              {canStoreSecrets
+                ? 'Simpan koneksi ini beserta password'
+                : 'Simpan host ini ke riwayat koneksi'}
+              <span class="block text-[11.5px] text-slate-400">
+                {canStoreSecrets
+                  ? 'Password dienkripsi AES-256 di database server ServerDeck, tidak pernah dikirim balik ke browser.'
+                  : dbMode
+                    ? 'Password tidak disimpan karena login web nonaktif (SECURITY_ENABLELOGIN=false).'
+                    : 'Hanya host dan username, di browser ini.'}
+              </span>
+            </span>
           </label>
 
           <button type="submit" id="btn-submit-login" class="btn-primary h-10 w-full text-sm">
@@ -152,7 +162,9 @@ const permRows = [
         </form>
 
         <p class="mt-6 text-center text-[12px] leading-relaxed text-slate-400">
-          Kredensial hanya dipakai untuk membuka sesi SSH dan tidak disimpan di server.
+          {dbMode
+            ? 'Setiap tab browser punya sesi SSH sendiri: buka tab baru untuk server lain.'
+            : 'Kredensial hanya dipakai untuk membuka sesi SSH dan tidak disimpan di server. Setiap tab punya sesi SSH sendiri.'}
         </p>
         {appUser && (
           <p class="mt-3 text-center text-[12px] text-slate-400">
@@ -322,6 +334,7 @@ const permRows = [
             <PipelinesView />
             <DockerView />
             <StorageView />
+            <DataView />
           </div>
         </main>
       </div>
@@ -526,15 +539,42 @@ const permRows = [
     return `${dir}/${name}`.replace(/\/+/g, '/');
   }
 
-  // Login aplikasi kedaluwarsa (401 + appLogin): kembali ke halaman login, dari request mana pun.
+  // Sesi SSH milik tab ini. sessionStorage terpisah per tab, sehingga tab A
+  // (server A) dan tab B (server B) tidak saling menimpa.
+  const SSH_SESSION_KEY = 'serverdeck.sshSession';
+  const sshSession = {
+    get() { try { return sessionStorage.getItem(SSH_SESSION_KEY); } catch { return null; } },
+    set(id) { try { sessionStorage.setItem(SSH_SESSION_KEY, id); } catch {} },
+    clear() { try { sessionStorage.removeItem(SSH_SESSION_KEY); } catch {} },
+  };
+
   const nativeFetch = window.fetch.bind(window);
-  window.fetch = async (...args) => {
-    const res = await nativeFetch(...args);
+  window.fetch = async (input, init = {}) => {
+    // Semua request ke /api/ membawa sesi SSH tab ini lewat header.
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const isApi = url.startsWith('/api/') || url.startsWith(`${location.origin}/api/`);
+    const sid = sshSession.get();
+    if (isApi && sid && !(input instanceof Request)) {
+      const headers = new Headers(init.headers || {});
+      if (!headers.has('X-SSH-Session')) headers.set('X-SSH-Session', sid);
+      init = { ...init, headers };
+    }
+    const res = await nativeFetch(input, init);
+    // Login aplikasi kedaluwarsa (401 + appLogin): kembali ke halaman login, dari request mana pun.
     if (res.status === 401 && (res.headers.get('content-type') || '').includes('json')) {
       res.clone().json().then((d) => { if (d.appLogin) location.href = '/login'; }).catch(() => {});
     }
     return res;
   };
+
+  /** URL biasa (tautan unduh) tidak bisa membawa header: sesi dikirim lewat ?sshs=. */
+  function withSession(url) {
+    const sid = sshSession.get();
+    return sid ? `${url}${url.includes('?') ? '&' : '?'}sshs=${encodeURIComponent(sid)}` : url;
+  }
+
+  const DB_MODE = appContainer.dataset.storage === 'database';
+  const CAN_STORE_SECRETS = appContainer.dataset.canStoreSecrets === 'true';
 
   document.querySelectorAll('.app-logout-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -545,6 +585,7 @@ const permRows = [
       });
       if (!ok) return;
       await fetch('/api/app-auth/logout', { method: 'POST' }).catch(() => {});
+      sshSession.clear();
       location.href = '/login';
     });
   });
@@ -573,6 +614,8 @@ const permRows = [
     $('sidebar-user-host').textContent = label;
     termUser = label;
     updatePrompt();
+    // Judul tab menunjukkan server, supaya tidak salah tab saat membuka banyak server.
+    document.title = `${label} · ServerDeck`;
   }
 
   // Platform server menentukan perintah yang relevan (Windows tidak punya df, free, dll).
@@ -596,7 +639,7 @@ const permRows = [
   }
 
   // ---------- Navigasi view (File Manager / Pipelines / Storage) ----------
-  const VIEW_TITLES = { files: 'File Manager', pipelines: 'Pipelines', docker: 'Docker', storage: 'Storage' };
+  const VIEW_TITLES = { files: 'File Manager', pipelines: 'Pipelines', docker: 'Docker', storage: 'Storage', data: 'Data' };
   let currentView = 'files';
 
   function viewFromHash() {
@@ -639,6 +682,8 @@ const permRows = [
   };
 
   function switchToUnauthView() {
+    sshSession.clear();
+    document.title = 'ServerDeck';
     appShell.classList.add('hidden');
     unauthView.classList.remove('hidden');
     unauthView.classList.add('flex');
@@ -677,33 +722,83 @@ const permRows = [
   }
 
   // ---------- Login ----------
-  function loadSavedPresets() {
+  // Mode database: koneksi dari server (password tetap di server, terenkripsi).
+  // Mode browser: host + username dari localStorage.
+  let savedConnections = [];
+  let selectedConnection = null;
+
+  function renderSavedOptions(items) {
+    const select = $('saved-presets-select');
+    select.innerHTML = '<option value="">Pilih koneksi tersimpan…</option>';
+    items.forEach((item) => {
+      const opt = document.createElement('option');
+      opt.value = item.value;
+      opt.textContent = item.label;
+      select.appendChild(opt);
+    });
+    $('saved-presets-container').classList.toggle('hidden', items.length === 0);
+  }
+
+  async function loadSavedPresets() {
+    selectedConnection = null;
+    updateSavedSecretHint();
+    if (DB_MODE) {
+      try {
+        const data = await api('/api/connections');
+        savedConnections = data.connections || [];
+        renderSavedOptions(savedConnections.map((c) => ({
+          value: c.id,
+          label: `${c.name ? `${c.name} · ` : ''}${c.username}@${c.host}:${c.port}${c.hasSecret ? '  🔒' : ''}`,
+        })));
+      } catch (e) {
+        console.error(e);
+        renderSavedOptions([]);
+      }
+      return;
+    }
     try {
       const saved = JSON.parse(localStorage.getItem('ssh_gui_presets') || '[]');
-      const select = $('saved-presets-select');
-      select.innerHTML = '<option value="">Pilih koneksi tersimpan…</option>';
-      saved.forEach((item, idx) => {
-        const opt = document.createElement('option');
-        opt.value = idx;
-        opt.textContent = `${item.username}@${item.host}:${item.port || 22}`;
-        select.appendChild(opt);
-      });
-      $('saved-presets-container').classList.toggle('hidden', saved.length === 0);
+      renderSavedOptions(saved.map((item, idx) => ({ value: String(idx), label: `${item.username}@${item.host}:${item.port || 22}` })));
     } catch (e) {
       console.error(e);
     }
   }
 
+  function updateSavedSecretHint() {
+    const show = Boolean(selectedConnection?.hasSecret);
+    $('saved-secret-hint').classList.toggle('hidden', !show);
+    $('saved-secret-hint').classList.toggle('flex', show);
+    $('input-password').placeholder = show ? 'Password tersimpan' : 'Password SSH';
+  }
+
   $('saved-presets-select').addEventListener('change', (e) => {
-    const idx = e.target.value;
-    if (idx === '') return;
-    const item = JSON.parse(localStorage.getItem('ssh_gui_presets') || '[]')[idx];
-    if (item) {
-      $('input-host').value = item.host || '';
-      $('input-port').value = item.port || 22;
-      $('input-username').value = item.username || 'root';
-      $('input-password').focus();
+    const value = e.target.value;
+    selectedConnection = null;
+    if (value === '') return updateSavedSecretHint();
+
+    const item = DB_MODE
+      ? savedConnections.find((c) => c.id === value)
+      : JSON.parse(localStorage.getItem('ssh_gui_presets') || '[]')[value];
+    if (!item) return;
+    $('input-host').value = item.host || '';
+    $('input-port').value = item.port || 22;
+    $('input-username').value = item.username || 'root';
+    if (DB_MODE) {
+      selectedConnection = item;
+      setAuthType(item.authType === 'key' ? 'key' : 'password');
     }
+    updateSavedSecretHint();
+    if (!selectedConnection?.hasSecret) $('input-password').focus();
+  });
+
+  // Mengubah host/port/username berarti koneksi lain: lepas pilihan tersimpan.
+  ['input-host', 'input-port', 'input-username'].forEach((id) => {
+    $(id).addEventListener('input', () => {
+      if (!selectedConnection) return;
+      selectedConnection = null;
+      $('saved-presets-select').value = '';
+      updateSavedSecretHint();
+    });
   });
 
   function setAuthType(type) {
@@ -739,17 +834,25 @@ const permRows = [
     submitBtn.disabled = true;
     $('login-btn-text').textContent = 'Menghubungkan…';
 
+    const save = $('checkbox-save-preset').checked;
     try {
       const data = await api('/api/auth/login', {
         host,
         port,
         username,
-        password: activeAuthType === 'password' ? password : undefined,
-        privateKey: activeAuthType === 'key' ? privateKey : undefined,
+        password: activeAuthType === 'password' && password ? password : undefined,
+        privateKey: activeAuthType === 'key' && privateKey ? privateKey : undefined,
         passphrase: activeAuthType === 'key' && passphrase ? passphrase : undefined,
+        // Koneksi tersimpan: server memakai password tersimpan bila field password kosong.
+        connectionId: DB_MODE && selectedConnection ? selectedConnection.id : undefined,
+        save: DB_MODE && save ? { storeSecret: CAN_STORE_SECRETS } : undefined,
       });
+      sshSession.set(data.sessionId);
+      if (data.secretRefused) {
+        window.showToast('Host disimpan tanpa password: aktifkan SECURITY_ENABLELOGIN untuk menyimpan password.', 'info', 6000);
+      }
 
-      if ($('checkbox-save-preset').checked) {
+      if (!DB_MODE && save) {
         try {
           const saved = JSON.parse(localStorage.getItem('ssh_gui_presets') || '[]')
             .filter((s) => !(s.host === host && s.username === username));
@@ -979,7 +1082,7 @@ const permRows = [
         <td class="px-4 py-1.5">
           <div class="flex items-center justify-end gap-0.5 transition lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
             ${item.isDirectory ? '' : actionButton('edit', 'Edit', ROW_ICONS.edit)}
-            ${item.isDirectory ? '' : `<a href="/api/files/download?path=${encodeURIComponent(item.path)}" download title="Download" aria-label="Download" class="icon-btn">${svg(ROW_ICONS.download)}</a>`}
+            ${item.isDirectory ? '' : `<a href="${withSession(`/api/files/download?path=${encodeURIComponent(item.path)}`)}" download title="Download" aria-label="Download" class="icon-btn">${svg(ROW_ICONS.download)}</a>`}
             ${actionButton('rename', 'Ubah nama', ROW_ICONS.rename)}
             ${actionButton('chmod', 'Izin akses', ROW_ICONS.lock)}
             ${actionButton('delete', 'Hapus', ROW_ICONS.trash, true)}
@@ -1427,9 +1530,25 @@ const permRows = [
   }
 
   // ---------- Start ----------
-  if (appContainer.dataset.authenticated === 'true') {
-    switchToAuthView();
-  } else {
-    loadSavedPresets();
+  // Tab ini sudah punya sesi SSH (mis. setelah refresh)? Lanjutkan; bila tidak, tampilkan login.
+  async function boot() {
+    const hideBoot = () => $('boot-view').remove();
+    if (!sshSession.get()) {
+      hideBoot();
+      return switchToUnauthView();
+    }
+    try {
+      const data = await api('/api/auth/status');
+      hideBoot();
+      if (!data.authenticated) return switchToUnauthView();
+      setUserHost(data.user.username, data.user.host);
+      setPlatform(data.system);
+      currentPath = data.system?.homeDir || '/';
+      switchToAuthView();
+    } catch {
+      hideBoot();
+      switchToUnauthView();
+    }
   }
+  boot();
 </script>

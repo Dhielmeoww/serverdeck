@@ -1,0 +1,223 @@
+---
+import Icon from './Icon.astro';
+import { storageMode } from '../lib/config';
+
+const dbMode = storageMode() === 'database';
+---
+
+<section data-view-panel="data" class="hidden">
+  <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div class="min-w-0">
+      <h1 class="text-[20px] font-bold tracking-tight text-slate-900">Data</h1>
+      <p class="mt-0.5 text-[13px] text-slate-500">
+        {dbMode ? 'Isi database ServerDeck di server milikmu sendiri.' : 'Di mana data ServerDeck disimpan.'}
+      </p>
+    </div>
+    {dbMode && (
+      <div class="flex items-center gap-2">
+        <button type="button" id="dt-refresh" class="btn-secondary"><Icon name="refresh" size={16} />Muat ulang</button>
+        <a id="dt-backup" href="/api/db/backup" class="btn-primary"><Icon name="save" size={16} />Unduh backup</a>
+      </div>
+    )}
+  </div>
+
+  {!dbMode && (
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="card p-5">
+        <p class="text-[14px] font-semibold text-slate-900">Mode sekarang: browser</p>
+        <p class="mt-1.5 text-[13px] leading-relaxed text-slate-600">
+          Pipeline dan daftar server disimpan di <b>localStorage browser ini</b>. Server ServerDeck tidak menyimpan apa pun,
+          dan password SSH tidak disimpan di mana pun. Data tidak ikut ke browser atau komputer lain; gunakan Ekspor/Import di halaman Pipelines.
+        </p>
+      </div>
+      <div class="card p-5">
+        <p class="text-[14px] font-semibold text-slate-900">Aktifkan mode database</p>
+        <p class="mt-1.5 text-[13px] leading-relaxed text-slate-600">
+          Simpan pipeline, riwayat, dan koneksi (termasuk password terenkripsi) di file SQLite di server milikmu. Tambahkan di docker-compose.yml:
+        </p>
+        <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-3 font-mono text-[12px] leading-relaxed text-slate-200">environment:
+  - STORAGE_MODE=database
+  - SECURITY_SECRET=string-acak-panjang
+volumes:
+  - ./serverdeck-data:/data</pre>
+        <p class="mt-2 text-[12px] text-slate-400">Lalu jalankan ulang: docker compose up -d</p>
+      </div>
+    </div>
+  )}
+
+  {dbMode && (
+    <div id="dt-content">
+      <div id="dt-alerts" class="space-y-2"></div>
+      <div id="dt-kpis" class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
+
+      <div class="mb-5 card overflow-hidden">
+        <div class="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <p class="text-[14px] font-semibold text-slate-900">Koneksi SSH tersimpan</p>
+          <p class="text-[12px] text-slate-400">Password tidak pernah ditampilkan atau dikirim ke browser</p>
+        </div>
+        <div id="dt-connections"></div>
+      </div>
+
+      <div class="mb-5 card overflow-hidden">
+        <div class="border-b border-slate-100 px-4 py-3">
+          <p class="text-[14px] font-semibold text-slate-900">Pipeline</p>
+        </div>
+        <div id="dt-pipelines"></div>
+      </div>
+
+      <div class="card p-5">
+        <p class="text-[14px] font-semibold text-slate-900">Mengakses database langsung</p>
+        <p class="mt-1 text-[13px] text-slate-600">Database adalah satu file SQLite. Tiga cara membukanya:</p>
+        <div class="mt-4 grid gap-4 lg:grid-cols-3">
+          <div>
+            <p class="text-[13px] font-medium text-slate-800">1. Lewat container (sqlite3)</p>
+            <pre class="mt-2 overflow-x-auto rounded-lg bg-slate-950 p-3 font-mono text-[11.5px] leading-relaxed text-slate-200">docker exec -it serverdeck \
+  sqlite3 /data/serverdeck.db
+
+.tables
+.schema connections
+SELECT host, username,
+  last_used_at FROM connections;
+SELECT name FROM pipelines;
+.quit</pre>
+          </div>
+          <div>
+            <p class="text-[13px] font-medium text-slate-800">2. Aplikasi desktop</p>
+            <p class="mt-2 text-[12.5px] leading-relaxed text-slate-600">
+              Unduh backup lewat tombol di atas (atau salin <code class="font-mono">./serverdeck-data/serverdeck.db</code> dari host),
+              lalu buka dengan <b>DB Browser for SQLite</b>, DBeaver, atau TablePlus.
+            </p>
+          </div>
+          <div>
+            <p class="text-[13px] font-medium text-slate-800">3. Yang terenkripsi</p>
+            <p class="mt-2 text-[12.5px] leading-relaxed text-slate-600">
+              Kolom <code class="font-mono">secret_enc</code>, <code class="font-mono">passphrase_enc</code>, dan <code class="font-mono">variables_enc</code>
+              berisi data terenkripsi AES-256-GCM. Tanpa kunci (<code class="font-mono">SECURITY_SECRET</code>), isinya tidak bisa dibaca, termasuk dari file backup.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )}
+</section>
+
+<script>
+  import { api, confirmAction, escapeHtml, formatBytes, formatRelative, ICON, onView, spinner, svg, toast } from '../lib/client';
+
+  const root = document.querySelector<HTMLElement>('[data-view-panel="data"]')!;
+  const content = document.getElementById('dt-content');
+
+  interface Info {
+    info: { path: string; size: number; tables: { name: string; label: string; rows: number }[]; runs: number; secrets: number };
+    keySource: 'env' | 'file';
+    mounted: boolean | null;
+    connections: { id: string; name: string; host: string; port: number; username: string; authType: string; hasSecret: boolean; createdAt: number; lastUsedAt: number | null }[];
+    pipelines: { id: string; name: string; steps: number; variables: number; runs: number; updatedAt: number }[];
+  }
+
+  const $ = (id: string) => document.getElementById(id)!;
+
+  function tile(label: string, value: string, sub = '') {
+    return `<div class="card px-4 py-3.5">
+      <p class="text-[12px] font-medium text-slate-500">${label}</p>
+      <p class="mt-1 truncate text-[20px] font-bold tracking-tight text-slate-900">${escapeHtml(value)}</p>
+      ${sub ? `<p class="mt-0.5 truncate text-[12px] text-slate-400" title="${escapeHtml(sub)}">${escapeHtml(sub)}</p>` : ''}
+    </div>`;
+  }
+
+  function alert(tone: 'red' | 'amber', html: string) {
+    const cls = tone === 'red' ? 'border-red-100 bg-red-50 text-red-800' : 'border-amber-100 bg-amber-50 text-amber-800';
+    return `<div class="mb-2 flex gap-2 rounded-lg border ${cls} px-3 py-2.5 text-[12.5px] leading-relaxed">${svg(ICON.alert, 'mt-0.5 size-4 shrink-0')}<span>${html}</span></div>`;
+  }
+
+  async function load() {
+    if (!content) return;
+    $('dt-connections').innerHTML = `<div class="flex items-center justify-center gap-2 py-10 text-[13px] text-slate-500">${spinner('size-4 text-brand-600')}Memuat…</div>`;
+    try {
+      const data = await api<Info>('/api/db/info');
+      render(data);
+    } catch (err: any) {
+      $('dt-connections').innerHTML = `<p class="py-10 text-center text-[13px] text-red-600">${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  function render(d: Info) {
+    const alerts: string[] = [];
+    if (d.mounted === false) {
+      alerts.push(alert('red', '<b>Folder data bukan volume.</b> Database berada di dalam container dan akan <b>hilang saat container dibuat ulang</b> (misalnya update image). Tambahkan <code class="font-mono">volumes: - ./serverdeck-data:/data</code> di docker-compose.yml.'));
+    }
+    if (d.keySource === 'file') {
+      alerts.push(alert('amber', 'Kunci enkripsi dibuat otomatis dan disimpan di folder data yang sama dengan database. Untuk keamanan lebih, set <code class="font-mono">SECURITY_SECRET</code> di environment sebelum menyimpan password (password yang sudah tersimpan perlu disimpan ulang setelah kunci diganti).'));
+    }
+    $('dt-alerts').innerHTML = alerts.join('');
+
+    const conn = d.info.tables.find((t) => t.name === 'connections')?.rows ?? 0;
+    const pipes = d.info.tables.find((t) => t.name === 'pipelines')?.rows ?? 0;
+    $('dt-kpis').innerHTML =
+      tile('File database', formatBytes(d.info.size), d.info.path) +
+      tile('Koneksi SSH', String(conn), `${d.info.secrets} dengan password tersimpan`) +
+      tile('Pipeline', String(pipes), `${d.info.runs} riwayat run`) +
+      tile('Kunci enkripsi', d.keySource === 'env' ? 'SECURITY_SECRET' : 'File otomatis', 'AES-256-GCM');
+
+    $('dt-connections').innerHTML = d.connections.length
+      ? `<div class="overflow-x-auto"><table class="w-full text-left text-[13px]">
+          <thead><tr class="border-b border-slate-200 text-[11.5px] font-semibold uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-2.5">Koneksi</th><th class="px-4 py-2.5">Autentikasi</th><th class="hidden px-4 py-2.5 sm:table-cell">Terakhir dipakai</th><th class="w-24 px-4 py-2.5"></th>
+          </tr></thead>
+          <tbody>${d.connections.map((c) => `
+            <tr data-id="${escapeHtml(c.id)}" class="border-b border-slate-100 last:border-0 hover:bg-slate-50/70">
+              <td class="px-4 py-2.5">
+                <p class="font-mono text-[12.5px] font-medium text-slate-900">${escapeHtml(c.username)}@${escapeHtml(c.host)}:${c.port}</p>
+                ${c.name ? `<p class="text-[11.5px] text-slate-400">${escapeHtml(c.name)}</p>` : ''}
+              </td>
+              <td class="px-4 py-2.5">${c.hasSecret
+                ? `<span class="badge badge-green">${svg(ICON.check, 'size-3', 2.4)}${c.authType === 'key' ? 'Private key' : 'Password'} tersimpan</span>`
+                : '<span class="badge badge-slate">Tanpa password</span>'}</td>
+              <td class="hidden px-4 py-2.5 text-[12.5px] text-slate-500 sm:table-cell">${c.lastUsedAt ? formatRelative(c.lastUsedAt) : '—'}</td>
+              <td class="px-4 py-1.5">
+                <div class="flex items-center justify-end gap-0.5">
+                  ${c.hasSecret ? `<button type="button" data-act="forget" class="icon-btn" title="Hapus password tersimpan" aria-label="Hapus password tersimpan">${svg(ICON.key)}</button>` : ''}
+                  <button type="button" data-act="delete" class="icon-btn hover:bg-red-50 hover:text-red-600" title="Hapus koneksi" aria-label="Hapus koneksi">${svg(ICON.trash)}</button>
+                </div>
+              </td>
+            </tr>`).join('')}</tbody></table></div>`
+      : '<p class="px-4 py-10 text-center text-[13px] text-slate-400">Belum ada koneksi tersimpan. Centang "Simpan koneksi ini" saat login SSH.</p>';
+
+    $('dt-pipelines').innerHTML = d.pipelines.length
+      ? `<div class="overflow-x-auto"><table class="w-full text-left text-[13px]">
+          <thead><tr class="border-b border-slate-200 text-[11.5px] font-semibold uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-2.5">Nama</th><th class="px-4 py-2.5">Langkah</th><th class="hidden px-4 py-2.5 sm:table-cell">Variabel</th><th class="hidden px-4 py-2.5 sm:table-cell">Riwayat run</th><th class="px-4 py-2.5">Diubah</th>
+          </tr></thead>
+          <tbody>${d.pipelines.map((p) => `
+            <tr class="border-b border-slate-100 last:border-0">
+              <td class="px-4 py-2.5 font-medium text-slate-900">${escapeHtml(p.name)}</td>
+              <td class="px-4 py-2.5 text-slate-600">${p.steps}</td>
+              <td class="hidden px-4 py-2.5 text-slate-600 sm:table-cell">${p.variables ? `${p.variables} <span class="text-[11.5px] text-slate-400">(terenkripsi)</span>` : '—'}</td>
+              <td class="hidden px-4 py-2.5 text-slate-600 sm:table-cell">${p.runs}</td>
+              <td class="px-4 py-2.5 text-[12.5px] text-slate-500">${formatRelative(p.updatedAt)}</td>
+            </tr>`).join('')}</tbody></table></div>`
+      : '<p class="px-4 py-10 text-center text-[13px] text-slate-400">Belum ada pipeline di database.</p>';
+  }
+
+  root.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('#dt-refresh')) return load();
+    const act = target.closest<HTMLElement>('[data-act]');
+    const id = target.closest<HTMLElement>('tr[data-id]')?.dataset.id;
+    if (!act || !id) return;
+
+    if (act.dataset.act === 'forget') {
+      const ok = await confirmAction({ title: 'Hapus password tersimpan?', message: 'Host tetap tersimpan; password perlu diketik lagi saat konek berikutnya.', okText: 'Hapus password' });
+      if (!ok) return;
+      await api('/api/connections', { action: 'forget-secret', id }).then(() => toast('Password dihapus dari database', 'success')).catch((err) => toast(err.message, 'error'));
+    }
+    if (act.dataset.act === 'delete') {
+      const ok = await confirmAction({ title: 'Hapus koneksi ini?', message: 'Koneksi beserta password tersimpannya dihapus dari database.', okText: 'Hapus' });
+      if (!ok) return;
+      await api('/api/connections', { action: 'delete', id }).then(() => toast('Koneksi dihapus', 'success')).catch((err) => toast(err.message, 'error'));
+    }
+    load();
+  });
+
+  onView('data', load);
+</script>

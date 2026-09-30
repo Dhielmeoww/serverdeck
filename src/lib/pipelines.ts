@@ -148,6 +148,60 @@ export function savePipelines(pipelines: Pipeline[]): boolean {
   }
 }
 
+// ---------- Penyimpanan: browser atau database ----------
+// Mode ditentukan server (STORAGE_MODE) dan dibawa halaman lewat data-storage.
+
+export type StoreMode = 'browser' | 'database';
+
+export function storeMode(): StoreMode {
+  return document.getElementById('app-container')?.dataset.storage === 'database' ? 'database' : 'browser';
+}
+
+export async function fetchPipelines(): Promise<Pipeline[]> {
+  if (storeMode() === 'browser') return loadPipelines();
+  const data = await api<{ pipelines: unknown[] }>('/api/pipelines');
+  return (data.pipelines || []).map(normalizePipeline);
+}
+
+/** Simpan satu pipeline. Mode browser menulis ulang seluruh daftar ke localStorage. */
+export async function storePipeline(all: Pipeline[], p: Pipeline): Promise<void> {
+  if (storeMode() === 'browser') {
+    if (!savePipelines(all)) throw new Error('Penyimpanan browser penuh. Hapus riwayat run atau pipeline lama.');
+    return;
+  }
+  await api('/api/pipelines', { action: 'save', pipeline: p });
+}
+
+export async function storeManyPipelines(all: Pipeline[], list: Pipeline[]): Promise<void> {
+  if (storeMode() === 'browser') {
+    if (!savePipelines(all)) throw new Error('Penyimpanan browser penuh.');
+    return;
+  }
+  await api('/api/pipelines', { action: 'import', pipelines: list });
+}
+
+export async function removeStoredPipeline(all: Pipeline[], id: string): Promise<void> {
+  if (storeMode() === 'browser') {
+    savePipelines(all);
+    return;
+  }
+  await api('/api/pipelines', { action: 'delete', id });
+}
+
+/** Jumlah pipeline lama di localStorage browser ini (untuk dipindahkan ke database). */
+export function browserPipelineCount(): number {
+  return loadPipelines().length;
+}
+
+/** Pindahkan pipeline dari localStorage ke database, lalu hapus salinan di browser. */
+export async function migrateBrowserPipelines(): Promise<number> {
+  const local = loadPipelines();
+  if (!local.length) return 0;
+  const res = await api<{ imported: number }>('/api/pipelines', { action: 'import', pipelines: local });
+  localStorage.removeItem(STORAGE_KEY);
+  return res.imported;
+}
+
 export function storageBytes(): number {
   try {
     return new Blob([localStorage.getItem(STORAGE_KEY) || '']).size;
