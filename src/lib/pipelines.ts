@@ -424,6 +424,26 @@ export const TEMPLATES: { id: string; name: string; description: string; create:
       ),
   },
   {
+    id: 'hermes-update',
+    name: 'Update Hermes Agent',
+    description: 'Cek versi, update dengan backup, cek kesehatan, lalu restart gateway.',
+    create: () =>
+      build(
+        'Update Hermes Agent',
+        'hermes update --backup → hermes doctor → restart gateway. Berhenti bila Hermes belum terpasang.',
+        [],
+        [
+          { type: 'condition', name: 'Hermes terpasang?', config: { command: 'command -v hermes', check: 'exit_zero' } },
+          { type: 'command', name: 'Versi sekarang', config: { command: 'hermes --version' } },
+          { type: 'command', name: 'Cek update', onError: 'continue', config: { command: 'hermes update --check' } },
+          { type: 'command', name: 'Update (dengan backup)', timeoutSec: 900, config: { command: 'hermes update --backup' } },
+          { type: 'command', name: 'Cek kesehatan', onError: 'continue', config: { command: 'hermes doctor' } },
+          { type: 'command', name: 'Restart gateway', onError: 'continue', config: { command: 'hermes gateway restart' } },
+          { type: 'command', name: 'Status gateway', onError: 'continue', config: { command: 'hermes gateway status' } },
+        ],
+      ),
+  },
+  {
     id: 'deploy',
     name: 'Deploy dari Git',
     description: 'Pull kode terbaru, install dependency, build, restart service, cek health.',

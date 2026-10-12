@@ -2,7 +2,7 @@
 
 # ServerDeck
 
-**Kelola server lewat browser: file, terminal, otomasi, Docker, dan storage, tanpa menyerahkan data kamu ke siapa pun.**
+**Kelola server lewat browser: file, terminal, otomasi, Docker, storage, dan agent AI, tanpa menyerahkan data kamu ke siapa pun.**
 
 Satu container. Database opsional, di servermu sendiri. Tanpa agent di server tujuan. Cukup SSH.
 
@@ -22,6 +22,7 @@ Panel server biasanya meminta imbalan: database untuk menyimpan kredensial, agen
   - Di kedua mode, tidak ada yang dikirim ke pihak ketiga, termasuk ke pembuat ServerDeck.
 - **Banyak server sekaligus.** Satu tab satu server: tab 1 ke server A, tab 2 ke server B, dan seterusnya, tanpa saling tertukar.
 - **Tanpa agent.** Server tujuan cukup punya SSH. Tidak ada yang perlu di-install di sana.
+- **Agent AI di servermu.** Pasang dan perintahkan [Hermes Agent](https://hermes-agent.nousresearch.com) lewat chat, langsung dari ServerDeck.
 - **Siap dalam satu perintah.** `docker compose up -d`, buka browser, selesai.
 - **Linux dan Windows.** Mendukung OpenSSH di Linux, dan OpenSSH Server Windows dengan shell cmd.exe atau PowerShell.
 
@@ -33,7 +34,11 @@ Panel server biasanya meminta imbalan: database untuk menyimpan kredensial, agen
 Jelajahi folder, cari, upload dengan drag & drop, download, rename, pindahkan, hapus, dan ubah izin akses (`chmod`) secara visual. Editor teks bawaan dengan `Ctrl+S`, lengkap dengan template siap pakai (Bash, Nginx, Docker Compose, Node.js, HTML).
 
 ### 💻 Terminal
-Jalankan perintah langsung di folder yang sedang dibuka, dengan riwayat perintah (↑/↓) dan shortcut cepat. Perintah yang menunggu input tidak akan menggantung: ada batas waktu dan penanganan `sudo` yang jelas.
+Shell interaktif sungguhan, sama seperti `ssh user@host`. Login shell dengan PTY membuat PATH dari `~/.bashrc` (npm global, nvm, dan sejenisnya), alias, `Tab` untuk autocomplete, `Ctrl+C`, warna, dan `cd` berlaku seperti biasa. Program interaktif ikut jalan: wizard setup, `vim`, `top`, sampai prompt password `sudo`.
+
+- Terbuka langsung di folder yang sedang dibuka di File Manager, dengan tombol **cd ke folder ini**.
+- Shortcut perintah cepat (`df -h`, `free -m`, `docker ps`) diketik langsung ke shell.
+- Perintah non-interaktif (pipeline) memakai PATH yang sama dengan login shell, jadi program seperti `node`, `pm2`, atau `openclaw` tetap ditemukan.
 
 ### ⚡ Pipelines: otomasi ala n8n
 Susun rangkaian langkah lalu jalankan dengan satu klik:
@@ -55,6 +60,7 @@ Susun rangkaian langkah lalu jalankan dengan satu klik:
   - Deploy dari Git
   - Bersihkan disk
   - Cek kesehatan server
+  - Update Hermes Agent
 - **Import/Export JSON** untuk backup atau berbagi dengan tim.
 
 ### 🐳 Docker: ala Portainer, tanpa agent
@@ -66,6 +72,19 @@ Kelola Docker di server lewat SSH, tanpa memasang apa pun di server:
 - **Detail**: ringkasan (status, jaringan, mount, environment tersamar), **logs live**, **stats** CPU/memori dengan grafik, **console interaktif** (`docker exec -it`, bash/sh), dan **inspect** JSON.
 - **Image & volume**: pull, hapus, dan bersihkan yang tidak terpakai.
 - Bekerja dengan user di grup `docker`, atau lewat `sudo` tanpa password.
+
+### 🤖 Hermes Agent: agent AI di servermu
+Kelola [Hermes Agent](https://hermes-agent.nousresearch.com) (Nous Research) di server tujuan, dan perintahkan dia lewat chat:
+
+- **Chat**: tulis perintah dalam bahasa biasa, dan Hermes mengerjakannya di server memakai tool-nya sendiri. Jawaban tampil langsung, lengkap dengan tool yang dipakai. Percakapan otomatis berlanjut; bila sesinya tidak bisa dilanjutkan, chat pindah ke sesi baru tanpa perlu mengetik ulang.
+- **Aman secara bawaan**: permintaan persetujuan untuk perintah berbahaya (hapus file, restart service) otomatis **ditolak**. Mode tanpa persetujuan (`--yolo`) hanya aktif bila kamu menyalakannya sendiri. Untuk menyetujui satu per satu, pakai **Mode terminal**.
+- **Install**: installer resmi dijalankan di terminal interaktif, jadi kamu bisa menjawab pertanyaannya, termasuk tawaran migrasi dari OpenClaw.
+- **Ringkasan**: `hermes status`, `hermes doctor` dengan perbaikan otomatis, serta cek update dan update dengan backup.
+- **Setup**: Nous Portal, pilih model/provider, dan tools, lewat wizard di terminal.
+- **Gateway**: start, stop, restart, status, pasang sebagai service systemd, dan setup platform (Telegram, Discord, Slack, WhatsApp, dan lainnya).
+- **Log live** (`gateway.log`, `agent.log`, dan lainnya), **konfigurasi** (`config.yaml` di editor bawaan; API key di `.env` ditampilkan tersamar), serta **cron & sesi**.
+
+Hermes terpasang dan berjalan **di server tujuan**, bukan di container ServerDeck. Config, API key, dan sesinya tetap di `~/.hermes` server itu.
 
 ### 📊 Storage
 Kapasitas setiap disk dengan status *Normal / Hampir penuh / Kritis*, pembagian pemakaian per folder yang bisa ditelusuri sampai ke sumbernya, dan pencarian file terbesar. Kamu langsung tahu apa yang memenuhi disk.
@@ -90,6 +109,8 @@ Kamu memilih di mana data disimpan lewat `STORAGE_MODE`. **Di kedua mode, data t
 | Password sudo | Memori browser selama run | Memori browser selama run (tidak pernah disimpan) |
 | Sesi SSH aktif | Memori proses ServerDeck, per tab | Memori proses ServerDeck, per tab |
 | Login web | Cookie bertanda tangan (HMAC) | Cookie bertanda tangan (HMAC) |
+| Riwayat chat Hermes | `localStorage` browser, per server | `localStorage` browser, per server |
+| Config & API key Hermes | `~/.hermes` di server tujuan | `~/.hermes` di server tujuan |
 
 **Kenapa dienkripsi, bukan di-hash?** Hash itu satu arah dan cocok untuk *mengecek* password. Password SSH perlu *dipakai ulang* untuk login ke server, jadi disimpan terenkripsi dengan kunci `SECURITY_SECRET`. Tanpa kunci itu, isi database (termasuk file backup) tidak bisa dibaca.
 
@@ -184,7 +205,7 @@ docker compose -f docker-compose.build.yml up -d --build
 Database adalah satu file SQLite: `./serverdeck-data/serverdeck.db` di host.
 
 ```bash
-# Interaktif lewat SSH biasa (sqlite3 sudah ada di image)
+# Interaktif, dari terminal ServerDeck atau SSH biasa (sqlite3 sudah ada di image)
 docker exec -it serverdeck sqlite3 -readonly /data/serverdeck.db
 
 sqlite> .tables
@@ -193,7 +214,7 @@ sqlite> SELECT name, updated_at FROM pipelines;
 sqlite> .quit
 ```
 
-Dari terminal bawah ServerDeck (tidak interaktif, tanpa TTY), jalankan satu query per perintah **tanpa `-it`**:
+Untuk satu query tanpa masuk ke prompt (misalnya di skrip atau langkah pipeline), jalankan **tanpa `-it`**:
 
 ```bash
 docker exec serverdeck sqlite3 -readonly -header -column /data/serverdeck.db "SELECT host, username FROM connections;"

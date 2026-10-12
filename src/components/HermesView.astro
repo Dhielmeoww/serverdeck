@@ -1,0 +1,228 @@
+---
+import Icon from './Icon.astro';
+---
+
+<section data-view-panel="hermes" class="hidden">
+  <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div class="min-w-0">
+      <h1 class="text-[20px] font-bold tracking-tight text-slate-900">Hermes Agent</h1>
+      <p id="hm-subtitle" class="mt-0.5 truncate text-[13px] text-slate-500">Agent AI dari Nous Research di server ini.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="https://hermes-agent.nousresearch.com/docs/" target="_blank" rel="noopener noreferrer" class="btn-secondary">Dokumentasi</a>
+      <button type="button" id="hm-refresh" class="btn-secondary"><Icon name="refresh" size={16} class="hm-refresh-icon" />Muat ulang</button>
+    </div>
+  </div>
+
+  <div id="hm-state"></div>
+
+  <div id="hm-main" class="hidden">
+    <div id="hm-tabs" class="segmented mb-4 grid-cols-6 sm:w-[640px]">
+      <button type="button" data-tab="chat" class="is-active">Chat</button>
+      <button type="button" data-tab="overview">Ringkasan</button>
+      <button type="button" data-tab="gateway">Gateway</button>
+      <button type="button" data-tab="logs">Log</button>
+      <button type="button" data-tab="config">Konfigurasi</button>
+      <button type="button" data-tab="jobs">Cron & sesi</button>
+    </div>
+
+    <!-- ============ CHAT ============ -->
+    <div data-panel="chat">
+      <div class="card flex h-[calc(100vh-15rem)] min-h-[480px] flex-col overflow-hidden">
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+          <button type="button" id="hm-chat-new" class="btn-secondary h-8 px-3"><Icon name="plus" size={14} />Percakapan baru</button>
+          <span id="hm-chat-session" class="truncate font-mono text-[11.5px] text-slate-400"></span>
+          <div class="ml-auto flex items-center gap-3">
+            <label class="flex items-center gap-1.5 text-[12.5px] text-slate-600" title="Batas langkah tool per pesan">
+              Maks. langkah
+              <select id="hm-chat-turns" class="field-input h-7 w-auto py-0 pr-7 text-[12px]">
+                <option>10</option><option selected>30</option><option>60</option>
+              </select>
+            </label>
+            <label class="flex items-center gap-1.5 text-[12.5px] text-slate-600" title="Jalankan perintah berbahaya tanpa persetujuan (--yolo)">
+              <input type="checkbox" id="hm-chat-yolo" class="size-4 accent-red-600" />
+              Tanpa persetujuan
+            </label>
+            <button type="button" id="hm-chat-repl" class="btn-secondary h-8 px-3" title="Buka Hermes interaktif di terminal (persetujuan ditanyakan langsung)"><Icon name="terminal" size={14} />Mode terminal</button>
+          </div>
+        </div>
+
+        <div id="hm-chat-yolo-warning" class="hidden border-b border-red-100 bg-red-50 px-4 py-2 text-[12px] text-red-700">
+          Mode tanpa persetujuan aktif: Hermes boleh menjalankan perintah berbahaya (hapus file, restart service, dll.) tanpa bertanya. Gunakan hanya bila kamu yakin.
+        </div>
+
+        <div id="hm-chat-log" class="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/60 px-4 py-5"></div>
+
+        <form id="hm-chat-form" class="border-t border-slate-100 p-3">
+          <div class="flex items-end gap-2">
+            <textarea id="hm-chat-input" rows="2" placeholder="Minta Hermes melakukan sesuatu di server ini… (Enter kirim, Shift+Enter baris baru)" class="field-input h-auto max-h-48 min-h-[44px] resize-none py-2.5 text-[13.5px] leading-relaxed"></textarea>
+            <button type="submit" id="hm-chat-send" class="btn-primary h-11 px-4"><Icon name="play" size={15} />Kirim</button>
+          </div>
+          <p id="hm-chat-hint" class="mt-1.5 text-[11.5px] text-slate-400"></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- ============ RINGKASAN ============ -->
+    <div data-panel="overview" class="hidden">
+      <div class="mb-4 grid gap-4 lg:grid-cols-2">
+        <div class="card overflow-hidden">
+          <div class="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+            <p class="text-[14px] font-semibold text-slate-900">Status</p>
+            <span class="ml-auto font-mono text-[11.5px] text-slate-400">hermes status --full</span>
+          </div>
+          <pre id="hm-status" class="hm-pre"></pre>
+        </div>
+        <div class="card overflow-hidden">
+          <div class="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+            <p class="text-[14px] font-semibold text-slate-900">Kesehatan</p>
+            <span id="hm-doctor-badge"></span>
+            <button type="button" data-action="doctor-fix" class="btn-secondary ml-auto h-8 px-3">Perbaiki otomatis</button>
+          </div>
+          <pre id="hm-doctor" class="hm-pre"></pre>
+        </div>
+      </div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card p-4">
+          <p class="text-[14px] font-semibold text-slate-900">Setup</p>
+          <p class="mt-0.5 text-[12.5px] text-slate-500">Wizard interaktif, dibuka di terminal.</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button type="button" data-terminal="hermes setup --portal" class="btn-primary h-8 px-3">Setup cepat (Nous Portal)</button>
+            <button type="button" data-terminal="hermes setup" class="btn-secondary h-8 px-3">Setup lengkap</button>
+            <button type="button" data-terminal="hermes model" class="btn-secondary h-8 px-3">Pilih model / provider</button>
+            <button type="button" data-terminal="hermes setup tools" class="btn-secondary h-8 px-3">Setup tools</button>
+          </div>
+        </div>
+        <div class="card p-4">
+          <p class="text-[14px] font-semibold text-slate-900">Update</p>
+          <p class="mt-0.5 text-[12.5px] text-slate-500">Cek versi terbaru, lalu update dengan backup otomatis.</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button type="button" data-action="update-check" class="btn-secondary h-8 px-3">Cek update</button>
+            <button type="button" data-action="update" class="btn-primary h-8 px-3">Update sekarang</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ GATEWAY ============ -->
+    <div data-panel="gateway" class="hidden">
+      <div class="card mb-4 p-4">
+        <p class="text-[14px] font-semibold text-slate-900">Gateway pesan</p>
+        <p class="mt-0.5 text-[12.5px] text-slate-500">Hubungkan Hermes ke Telegram, Discord, Slack, WhatsApp, dan lainnya. Pasang sebagai service supaya tetap jalan setelah server reboot.</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button type="button" data-action="gateway-start" class="btn-secondary h-8 px-3"><Icon name="play" size={14} />Start</button>
+          <button type="button" data-action="gateway-stop" class="btn-secondary h-8 px-3">Stop</button>
+          <button type="button" data-action="gateway-restart" class="btn-secondary h-8 px-3"><Icon name="refresh" size={14} />Restart</button>
+          <button type="button" data-action="gateway-status" class="btn-secondary h-8 px-3">Status</button>
+          <button type="button" data-action="gateway-list" class="btn-secondary h-8 px-3">Daftar profil</button>
+          <span class="mx-1 w-px self-stretch bg-slate-200"></span>
+          <button type="button" data-action="gateway-install" class="btn-secondary h-8 px-3">Pasang sebagai service</button>
+          <button type="button" data-terminal="hermes setup gateway" class="btn-primary h-8 px-3">Setup platform (wizard)</button>
+        </div>
+      </div>
+      <div class="card overflow-hidden">
+        <div class="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+          <p id="hm-gateway-title" class="font-mono text-[12.5px] text-slate-600">hermes gateway status</p>
+          <span id="hm-gateway-badge" class="ml-auto"></span>
+        </div>
+        <pre id="hm-gateway-output" class="hm-pre"></pre>
+      </div>
+    </div>
+
+    <!-- ============ LOG ============ -->
+    <div data-panel="logs" class="hidden">
+      <div class="card overflow-hidden">
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3">
+          <select id="hm-log-file" class="field-input h-8 w-auto pr-8 text-[12.5px]" aria-label="File log"></select>
+          <select id="hm-log-tail" class="field-input h-8 w-auto pr-8 text-[12.5px]" aria-label="Jumlah baris">
+            <option value="200">200 baris</option>
+            <option value="1000" selected>1.000 baris</option>
+            <option value="5000">5.000 baris</option>
+          </select>
+          <label class="flex items-center gap-1.5 text-[12.5px] text-slate-600"><input type="checkbox" id="hm-log-follow" class="size-4 accent-brand-600" checked />Live</label>
+          <input id="hm-log-filter" placeholder="Filter baris…" class="field-input ml-auto h-8 w-full text-[12.5px] sm:w-56" />
+        </div>
+        <pre id="hm-log-output" class="terminal-scroll h-[62vh] overflow-auto whitespace-pre-wrap break-all bg-slate-950 p-4 font-mono text-[12px] leading-relaxed text-slate-200"></pre>
+      </div>
+    </div>
+
+    <!-- ============ KONFIGURASI ============ -->
+    <div data-panel="config" class="hidden">
+      <div class="mb-4 card p-4">
+        <p class="text-[14px] font-semibold text-slate-900">File konfigurasi</p>
+        <p id="hm-config-paths" class="mt-0.5 font-mono text-[12px] text-slate-500"></p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button type="button" id="hm-edit-config" class="btn-primary h-8 px-3"><Icon name="edit" size={14} />Edit config.yaml</button>
+          <button type="button" id="hm-edit-env" class="btn-secondary h-8 px-3">Edit .env</button>
+          <button type="button" id="hm-open-home" class="btn-secondary h-8 px-3">Buka folder di File Manager</button>
+        </div>
+      </div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card overflow-hidden">
+          <div class="border-b border-slate-100 px-4 py-3">
+            <p class="text-[14px] font-semibold text-slate-900">API key & variabel (.env)</p>
+            <p class="text-[12px] text-slate-400">Nilai disamarkan.</p>
+          </div>
+          <div id="hm-env"></div>
+        </div>
+        <div class="card overflow-hidden">
+          <div class="flex items-center border-b border-slate-100 px-4 py-3">
+            <p class="text-[14px] font-semibold text-slate-900">Nilai aktif</p>
+            <span class="ml-auto font-mono text-[11.5px] text-slate-400">hermes config show</span>
+          </div>
+          <pre id="hm-config-show" class="hm-pre"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ CRON & SESI ============ -->
+    <div data-panel="jobs" class="hidden">
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card overflow-hidden">
+          <div class="flex items-center border-b border-slate-100 px-4 py-3">
+            <p class="text-[14px] font-semibold text-slate-900">Jadwal (cron)</p>
+            <span class="ml-auto font-mono text-[11.5px] text-slate-400">hermes cron list</span>
+          </div>
+          <pre id="hm-cron" class="hm-pre"></pre>
+        </div>
+        <div class="card overflow-hidden">
+          <div class="flex items-center border-b border-slate-100 px-4 py-3">
+            <p class="text-[14px] font-semibold text-slate-900">Sesi terakhir</p>
+            <span class="ml-auto font-mono text-[11.5px] text-slate-400">hermes sessions list</span>
+          </div>
+          <pre id="hm-sessions" class="hm-pre"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style is:global>
+  .hm-pre {
+    max-height: 60vh;
+    min-height: 8rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 0.875rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: #334155;
+  }
+  .hm-md p + p,
+  .hm-md p + pre,
+  .hm-md pre + p,
+  .hm-md ul + p,
+  .hm-md p + ul { margin-top: 0.6rem; }
+  .hm-md ul { list-style: disc; padding-left: 1.25rem; }
+  .hm-md li + li { margin-top: 0.2rem; }
+  .hm-md code { border-radius: 4px; background: #f1f5f9; padding: 1px 5px; font-family: var(--font-mono); font-size: 12px; }
+  .hm-md pre { overflow-x: auto; border-radius: 8px; background: #020617; padding: 10px 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: #e2e8f0; }
+  .hm-md pre code { background: none; padding: 0; color: inherit; }
+  .hm-md strong { font-weight: 600; color: #0f172a; }
+</style>
+
+<script>
+  import '../lib/hermes-ui';
+</script>

@@ -4,6 +4,7 @@ import Icon from '../components/Icon.astro';
 import PipelinesView from '../components/PipelinesView.astro';
 import StorageView from '../components/StorageView.astro';
 import DockerView from '../components/DockerView.astro';
+import HermesView from '../components/HermesView.astro';
 import DataView from '../components/DataView.astro';
 import { storageMode } from '../lib/config';
 import { loginEnabled } from '../lib/app-auth';
@@ -37,6 +38,7 @@ const views = [
   { id: 'files', label: 'File Manager', icon: 'folder' },
   { id: 'pipelines', label: 'Pipelines', icon: 'workflow' },
   { id: 'docker', label: 'Docker', icon: 'container' },
+  { id: 'hermes', label: 'Hermes Agent', icon: 'bot' },
   { id: 'storage', label: 'Storage', icon: 'hardDrive' },
   { id: 'data', label: 'Data', icon: 'database' },
 ] as const;
@@ -335,6 +337,7 @@ const permRows = [
 
             <PipelinesView />
             <DockerView />
+            <HermesView />
             <StorageView />
             <DataView />
           </div>
@@ -632,7 +635,7 @@ const permRows = [
   }
 
   // ---------- Navigasi view (File Manager / Pipelines / Storage) ----------
-  const VIEW_TITLES = { files: 'File Manager', pipelines: 'Pipelines', docker: 'Docker', storage: 'Storage', data: 'Data' };
+  const VIEW_TITLES = { files: 'File Manager', pipelines: 'Pipelines', docker: 'Docker', hermes: 'Hermes Agent', storage: 'Storage', data: 'Data' };
   let currentView = 'files';
 
   function viewFromHash() {
@@ -1426,6 +1429,10 @@ const permRows = [
 
   $('btn-toggle-terminal').addEventListener('click', () => setTerminal(!isTerminalOpen));
   $('btn-close-terminal').addEventListener('click', closeTerminal);
+
+  // Dipakai view lain (mis. Hermes): buka laci terminal, buka file di editor.
+  window.openTerminal = () => setTerminal(true);
+  window.openFileEditor = (path) => openFileInEditor(path, path.split('/').pop());
 
   // ---------- Start ----------
   // Tab ini sudah punya sesi SSH (mis. setelah refresh)? Lanjutkan; bila tidak, tampilkan login.

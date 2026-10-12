@@ -16,6 +16,8 @@ const statusEl = document.getElementById('term-status')!;
 const reconnectBtn = document.getElementById('btn-term-reconnect')!;
 let ctl: ConsoleController | null = null;
 let firstConnect = true;
+// Perintah yang menunggu shell tersambung (dari window.runInTerminal).
+let pendingCommand: string | null = null;
 
 function winPath(path: string) {
   let p = path.replace(/^\/([A-Za-z]:)/, '$1').replace(/\//g, '\\');
@@ -46,9 +48,27 @@ function onStatus(status: Status, message?: string) {
     firstConnect = false;
     const folder = currentFolder();
     const home = document.getElementById('app-container')?.dataset.initialHome;
-    if (folder && folder !== home) ctl?.send(`${cdCommand(folder)} && clear\r`);
+    if (folder && folder !== home && !pendingCommand) ctl?.send(`${cdCommand(folder)} && clear\r`);
+  }
+  if (status === 'connected' && pendingCommand) {
+    const command = pendingCommand;
+    pendingCommand = null;
+    // Beri jeda supaya prompt shell siap menerima input.
+    setTimeout(() => ctl?.send(`${command}\r`), 400);
   }
 }
+
+window.runInTerminal = (command: string) => {
+  window.openTerminal?.();
+  const c = ensure();
+  if (c.status === 'connected') {
+    c.send(`${command}\r`);
+    c.focus();
+  } else {
+    pendingCommand = command;
+    if (c.status !== 'connecting') c.connect();
+  }
+};
 
 function ensure(): ConsoleController {
   if (!ctl) {

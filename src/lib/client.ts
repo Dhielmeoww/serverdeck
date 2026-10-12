@@ -17,6 +17,12 @@ declare global {
     showToast(message: string, type?: ToastType, duration?: number): void;
     confirmDialog(options: ConfirmOptions): Promise<boolean>;
     openInFiles?(path: string): void;
+    /** Buka laci terminal interaktif. */
+    openTerminal?(): void;
+    /** Buka terminal lalu ketik dan jalankan perintah (wizard, installer). */
+    runInTerminal?(command: string): void;
+    /** Buka file server di editor teks bawaan. */
+    openFileEditor?(path: string): void;
   }
 }
 
