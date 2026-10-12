@@ -6,6 +6,8 @@ import StorageView from '../components/StorageView.astro';
 import DockerView from '../components/DockerView.astro';
 import HermesView from '../components/HermesView.astro';
 import DataView from '../components/DataView.astro';
+import LoginBackdrop from '../components/reactbits/LoginBackdrop';
+import HeadingBlur from '../components/reactbits/HeadingBlur';
 import { storageMode } from '../lib/config';
 import { loginEnabled } from '../lib/app-auth';
 // Terminal bawah memakai xterm.js (CSS harus di-import statis agar ikut di-bundle).
@@ -74,13 +76,14 @@ const permRows = [
     </div>
 
     <!-- ============ SIGN IN ============ -->
-    <div id="unauth-view" class="hidden min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
-      <div class="w-full max-w-sm">
+    <div id="unauth-view" class="relative hidden min-h-screen items-center justify-center overflow-hidden bg-slate-50 px-4 py-10">
+      <LoginBackdrop client:idle />
+      <div class="relative w-full max-w-sm">
         <div class="mb-8 text-center">
           <span class="mx-auto mb-5 inline-flex size-12 items-center justify-center rounded-xl bg-brand-600 text-white">
             <Icon name="terminal" size={24} stroke={2.2} />
           </span>
-          <h1 class="text-[22px] font-bold text-slate-900">Sign in to ServerDeck</h1>
+          <div role="heading" aria-level="1"><HeadingBlur client:visible text="Sign in to ServerDeck" className="text-[22px] font-bold text-slate-900" /></div>
           <p class="mt-1 text-[13px] text-slate-500">Kelola file, izin akses, dan terminal server remote lewat SSH.</p>
         </div>
 

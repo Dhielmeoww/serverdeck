@@ -1,6 +1,8 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import Icon from '../components/Icon.astro';
+import LoginBackdrop from '../components/reactbits/LoginBackdrop';
+import HeadingBlur from '../components/reactbits/HeadingBlur';
 import { loginMisconfigured } from '../lib/app-auth';
 
 export const prerender = false;
@@ -9,13 +11,14 @@ const misconfigured = loginMisconfigured();
 ---
 
 <Layout title="Masuk · ServerDeck">
-  <div class="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
-    <div class="w-full max-w-sm">
+  <div class="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-50 px-4 py-10">
+    <LoginBackdrop client:idle />
+    <div class="relative w-full max-w-sm">
       <div class="mb-8 text-center">
         <span class="mx-auto mb-5 inline-flex size-12 items-center justify-center rounded-xl bg-brand-600 text-white">
           <Icon name="lock" size={22} stroke={2} />
         </span>
-        <h1 class="text-[22px] font-bold text-slate-900">Masuk ke ServerDeck</h1>
+        <div role="heading" aria-level="1"><HeadingBlur client:load text="Masuk ke ServerDeck" className="text-[22px] font-bold text-slate-900" /></div>
         <p class="mt-1 text-[13px] text-slate-500">Login aplikasi dulu, setelah itu hubungkan server SSH.</p>
       </div>
 

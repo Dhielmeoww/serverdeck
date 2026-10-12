@@ -37,14 +37,15 @@
 
 /* Komponen dasar gaya clean: tombol, isian, lencana, dialog. */
 @layer components {
+  /* whitespace-nowrap: label tombol tidak patah jadi dua baris di layar sempit. */
   .btn-primary {
-    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3.5 text-[13px] font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-brand-600 px-3.5 text-[13px] font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60;
   }
   .btn-secondary {
-    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60;
+    @apply inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60;
   }
   .btn-danger {
-    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3.5 text-[13px] font-semibold text-white transition hover:bg-red-700 disabled:opacity-60;
+    @apply inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-red-600 px-3.5 text-[13px] font-semibold text-white transition hover:bg-red-700 disabled:opacity-60;
   }
   .icon-btn {
     @apply inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40;
@@ -59,7 +60,7 @@
     @apply rounded-xl border border-slate-200 bg-white;
   }
   .badge {
-    @apply inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold;
   }
   .badge-green { @apply bg-emerald-50 text-emerald-700; }
   .badge-slate { @apply bg-slate-100 text-slate-500; }
@@ -84,6 +85,17 @@
   }
   .segmented button.is-active {
     @apply bg-white text-slate-900 shadow-sm;
+  }
+  /* Tab banyak: di HP digeser ke samping (tidak bertumpuk), di layar lebar kembali grid. */
+  .scroll-tabs {
+    @apply flex overflow-x-auto sm:grid;
+    scrollbar-width: none;
+  }
+  .scroll-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .scroll-tabs button {
+    @apply shrink-0 whitespace-nowrap px-3.5 sm:px-0;
   }
 
   .dialog-backdrop {
@@ -111,6 +123,16 @@
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* HP: teks isian minimal 16px. Di bawah itu Safari iOS memperbesar halaman saat
+   isian difokus. Sengaja di luar @layer supaya mengalahkan utilitas ukuran teks. */
+@media (max-width: 639px) {
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
 
 .terminal-scroll::-webkit-scrollbar-thumb { background: #334155; }
 

@@ -24,7 +24,7 @@ import '@xterm/xterm/css/xterm.css';
       <div id="dk-kpis" class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
 
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <div id="dk-tabs" class="segmented grid-cols-3 sm:w-[420px]">
+        <div id="dk-tabs" class="segmented scroll-tabs w-full sm:w-[420px] sm:grid-cols-3">
           <button type="button" data-tab="containers" class="is-active">Container <span data-count="containers" class="ml-1 text-slate-400"></span></button>
           <button type="button" data-tab="images">Image <span data-count="images" class="ml-1 text-slate-400"></span></button>
           <button type="button" data-tab="volumes">Volume <span data-count="volumes" class="ml-1 text-slate-400"></span></button>
@@ -77,7 +77,7 @@ import '@xterm/xterm/css/xterm.css';
       <div id="dk-detail-actions" class="flex flex-wrap items-center gap-2"></div>
     </div>
 
-    <div id="dk-detail-tabs" class="segmented mb-4 grid-cols-5 sm:w-[560px]">
+    <div id="dk-detail-tabs" class="segmented scroll-tabs mb-4 sm:w-[560px] sm:grid-cols-5">
       <button type="button" data-dtab="overview" class="is-active">Ringkasan</button>
       <button type="button" data-dtab="logs">Logs</button>
       <button type="button" data-dtab="stats">Stats</button>

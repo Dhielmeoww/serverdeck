@@ -385,7 +385,7 @@ function renderMarkdown(text: string): string {
 
 function messageHtml(m: Message, index: number): string {
   if (m.role === 'user') {
-    return `<div class="flex justify-end"><div class="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-brand-600 px-4 py-2.5 text-[13.5px] leading-relaxed text-white">${escapeHtml(m.text)}</div></div>`;
+    return `<div class="flex justify-end"><div class="max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-brand-600 px-3.5 py-2 text-[14px] leading-relaxed text-white sm:max-w-[85%] sm:px-4 sm:py-2.5 sm:text-[13.5px]">${escapeHtml(m.text)}</div></div>`;
   }
   const streaming = !m.done && !m.error;
   const tools = m.tools.length
@@ -397,35 +397,27 @@ function messageHtml(m: Message, index: number): string {
     : '';
   const notes = m.notes.length ? `<p class="mt-2 whitespace-pre-wrap text-[11.5px] text-slate-400">${escapeHtml(m.notes.join('\n'))}</p>` : '';
   const body = m.text.trim()
-    ? `<div class="hm-md text-[13.5px] leading-relaxed text-slate-800">${renderMarkdown(m.text)}</div>`
+    ? `<div class="hm-md text-[14px] leading-relaxed text-slate-800 sm:text-[13.5px]">${renderMarkdown(m.text)}</div>`
     : streaming
       ? `<div class="flex items-center gap-2 text-[13px] text-slate-500">${spinner('size-3.5 text-brand-600')}Hermes sedang bekerja…</div>`
       : '';
   const error = m.error ? `<div class="mt-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-[12.5px] text-red-700">${escapeHtml(m.error)}</div>` : '';
   return `
-    <div class="flex gap-3" data-msg="${index}">
-      <span class="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white">${svg(ICON.zap, 'size-3.5')}</span>
-      <div class="min-w-0 max-w-[85%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3">${tools}${body}${error}${notes}</div>
+    <div class="flex gap-2 sm:gap-3" data-msg="${index}">
+      <span class="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white sm:size-7">${svg(ICON.zap, 'size-3 sm:size-3.5')}</span>
+      <div class="min-w-0 max-w-[calc(100%-2rem)] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-3.5 py-2.5 sm:max-w-[85%] sm:px-4 sm:py-3">${tools}${body}${error}${notes}</div>
     </div>`;
 }
-
-const SUGGESTIONS = [
-  'Cek kondisi server ini: CPU, memori, disk, dan service yang gagal.',
-  'Tampilkan container Docker yang sedang berjalan dan yang berhenti.',
-  'Ringkas error di log Nginx 24 jam terakhir.',
-];
 
 function renderMessages() {
   const log = $('hm-chat-log');
   $('hm-chat-session').textContent = convo.sessionId ? `sesi ${convo.sessionId}` : '';
-  if (!convo.messages.length) {
-    log.innerHTML = `
-      <div class="mx-auto flex max-w-lg flex-col items-center pt-8 text-center">
-        <span class="mb-3 inline-flex size-12 items-center justify-center rounded-full bg-slate-900 text-white">${svg(ICON.zap, 'size-6')}</span>
-        <p class="text-[15px] font-semibold text-slate-900">Perintahkan Hermes</p>
-        <p class="mt-1 text-[13px] leading-relaxed text-slate-500">Hermes berjalan di server ini dan memakai tool-nya sendiri untuk mengerjakan permintaanmu.</p>
-        <div class="mt-5 w-full space-y-2">${SUGGESTIONS.map((s) => `<button type="button" data-suggest="${escapeHtml(s)}" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-[13px] text-slate-700 transition hover:border-brand-300 hover:bg-brand-50/50">${escapeHtml(s)}</button>`).join('')}</div>
-      </div>`;
+  // Layar awal (React Bits) ada di markup statis #hm-chat-empty; di sini cukup ditukar tampil.
+  const empty = !convo.messages.length;
+  $('hm-chat-empty').classList.toggle('hidden', !empty);
+  log.classList.toggle('hidden', empty);
+  if (empty) {
+    log.innerHTML = '';
     return;
   }
   log.innerHTML = convo.messages.map(messageHtml).join('');
@@ -451,7 +443,7 @@ function renderLastBubble() {
 
 function renderChatHint() {
   $('hm-chat-hint').textContent = info?.streamJson
-    ? 'Percakapan dilanjutkan otomatis. Persetujuan perintah berbahaya ditolak kecuali "Tanpa persetujuan" dinyalakan; untuk menyetujui satu per satu, pakai Mode terminal.'
+    ? 'Enter kirim, Shift+Enter baris baru. Percakapan dilanjutkan otomatis. Persetujuan perintah berbahaya ditolak kecuali "Tanpa persetujuan" dinyalakan; untuk menyetujui satu per satu, pakai Mode terminal.'
     : 'Versi Hermes ini belum mendukung output terstruktur: setiap pesan memulai sesi baru. Update Hermes untuk percakapan berlanjut, atau pakai Mode terminal.';
 }
 
@@ -617,10 +609,23 @@ async function sendMessage(prompt: string) {
 
 function setSending(sending: boolean) {
   const btn = $<HTMLButtonElement>('hm-chat-send');
-  btn.className = sending ? 'btn-danger h-11 px-4' : 'btn-primary h-11 px-4';
-  btn.innerHTML = sending ? `${svg(ICON.stop, 'size-3.5', 2.2)}Hentikan` : `${svg(ICON.play, 'size-3.5', 2.2)}Kirim`;
+  // HP: tombol ikon persegi; layar lebar: ikon + teks.
+  const size = 'size-11 shrink-0 px-0 sm:w-auto sm:px-4';
+  btn.className = `${sending ? 'btn-danger' : 'btn-primary'} ${size}`;
+  btn.setAttribute('aria-label', sending ? 'Hentikan' : 'Kirim');
+  btn.innerHTML = sending
+    ? `${svg(ICON.stop, 'size-3.5', 2.2)}<span class="hidden sm:inline">Hentikan</span>`
+    : `${svg(ICON.play, 'size-3.5', 2.2)}<span class="hidden sm:inline">Kirim</span>`;
   $<HTMLTextAreaElement>('hm-chat-input').disabled = sending;
 }
+
+// Placeholder pendek di layar sempit supaya tidak terlipat dua baris.
+const narrow = window.matchMedia('(max-width: 639px)');
+const setPlaceholder = () => {
+  $<HTMLTextAreaElement>('hm-chat-input').placeholder = narrow.matches ? 'Perintahkan Hermes…' : 'Minta Hermes melakukan sesuatu di server ini…';
+};
+setPlaceholder();
+narrow.addEventListener('change', setPlaceholder);
 
 $('hm-chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -631,17 +636,42 @@ $('hm-chat-form').addEventListener('submit', (e) => {
   const input = $<HTMLTextAreaElement>('hm-chat-input');
   const prompt = input.value;
   input.value = '';
+  autoGrow();
   sendMessage(prompt);
 });
 
+// Layar sentuh: keyboard HP tidak punya Shift+Enter, jadi Enter = baris baru dan
+// kirim lewat tombol. Keyboard fisik: Enter kirim, Shift+Enter baris baru.
+const touchInput = window.matchMedia('(pointer: coarse)').matches;
+if (touchInput) $('hm-chat-input').setAttribute('enterkeyhint', 'enter');
+
 $('hm-chat-input').addEventListener('keydown', (e) => {
+  if (touchInput) return;
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     $<HTMLFormElement>('hm-chat-form').requestSubmit();
   }
 });
 
-$('hm-chat-log').addEventListener('click', (e) => {
+/** Kotak isian tumbuh mengikuti isi (sampai max-h), lalu bisa di-scroll. */
+function autoGrow() {
+  const input = $<HTMLTextAreaElement>('hm-chat-input');
+  input.style.height = 'auto';
+  input.style.height = `${Math.min(input.scrollHeight + 2, 160)}px`;
+}
+$('hm-chat-input').addEventListener('input', autoGrow);
+
+// Pengaturan chat (maks. langkah, tanpa persetujuan, mode terminal): di HP dilipat.
+$('hm-chat-settings-toggle').addEventListener('click', () => {
+  const panel = $('hm-chat-settings');
+  const open = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !open);
+  panel.classList.toggle('flex', open);
+  $('hm-chat-settings-toggle').setAttribute('aria-expanded', String(open));
+  $('hm-chat-settings-toggle').classList.toggle('bg-slate-100', open);
+});
+
+$('hm-chat-empty').addEventListener('click', (e) => {
   const s = (e.target as HTMLElement).closest<HTMLElement>('[data-suggest]')?.dataset.suggest;
   if (s) sendMessage(s);
 });
@@ -659,7 +689,10 @@ $('hm-chat-new').addEventListener('click', async () => {
 });
 
 $('hm-chat-yolo').addEventListener('change', (e) => {
-  $('hm-chat-yolo-warning').classList.toggle('hidden', !(e.target as HTMLInputElement).checked);
+  const on = (e.target as HTMLInputElement).checked;
+  $('hm-chat-yolo-warning').classList.toggle('hidden', !on);
+  // Lencana tetap terlihat walau panel pengaturan dilipat (HP).
+  $('hm-chat-yolo-badge').classList.toggle('hidden', !on);
 });
 
 $('hm-chat-repl').addEventListener('click', () => {
