@@ -11,7 +11,15 @@ export default defineConfig({
     mode: 'standalone'
   }),
   // React hanya untuk komponen visual React Bits (island); sisa aplikasi tetap tanpa framework.
-  integrations: [react()],
+  integrations: [react(), {
+    name: 'isolated-vite-cache',
+    hooks: {
+      // `astro check`/build must not replace an active dev server's React optimizer output.
+      'astro:config:setup': ({ command, updateConfig }) => {
+        updateConfig({ vite: { cacheDir: `node_modules/.vite/astro-${command}` } });
+      }
+    }
+  }],
   vite: {
     plugins: [tailwindcss()]
   },

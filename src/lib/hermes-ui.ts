@@ -2,6 +2,7 @@
  * Halaman Hermes Agent: chat, status, gateway, log, konfigurasi, cron & sesi.
  */
 import { api, confirmAction, currentHost, escapeHtml, ICON, onView, spinner, svg, toast } from './client';
+import { hermesChat } from './hermes-chat-state';
 
 interface Info {
   installed: boolean;
@@ -99,6 +100,9 @@ root.addEventListener('click', (e) => {
 
 function setTab(next: Tab) {
   tab = next;
+  const activeTab = root.querySelector<HTMLElement>(`#hm-tabs [data-tab="${next}"]`);
+  $('hm-menu-label').textContent = activeTab?.textContent || 'Chat';
+  setMenuOpen(false, $('hm-menu-toggle').getAttribute('aria-expanded') === 'true');
   root.querySelectorAll<HTMLElement>('#hm-tabs [data-tab]').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === next));
   root.querySelectorAll<HTMLElement>('[data-panel]').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== next));
   if (next !== 'logs') stopLogs();
@@ -118,6 +122,24 @@ function setTab(next: Tab) {
 $('hm-tabs').addEventListener('click', (e) => {
   const t = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]')?.dataset.tab as Tab | undefined;
   if (t) setTab(t);
+});
+
+function setMenuOpen(open: boolean, restoreFocus = false) {
+  $('hm-menu-toggle').setAttribute('aria-expanded', String(open));
+  $('hm-navigation').toggleAttribute('data-open', open);
+  if (!open && restoreFocus) $('hm-menu-toggle').focus();
+}
+$('hm-menu-toggle').addEventListener('click', () => {
+  setMenuOpen($('hm-menu-toggle').getAttribute('aria-expanded') !== 'true');
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!(e.target as HTMLElement).closest('#hm-navigation, #hm-menu-toggle')) setMenuOpen(false);
+});
+root.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('hm-menu-toggle').getAttribute('aria-expanded') === 'true') {
+    e.preventDefault();
+    setMenuOpen(false, true);
+  }
 });
 
 // ---------- Perintah tetap ----------
@@ -387,7 +409,6 @@ function messageHtml(m: Message, index: number): string {
   if (m.role === 'user') {
     return `<div class="flex justify-end"><div class="max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-brand-600 px-3.5 py-2 text-[14px] leading-relaxed text-white sm:max-w-[85%] sm:px-4 sm:py-2.5 sm:text-[13.5px]">${escapeHtml(m.text)}</div></div>`;
   }
-  const streaming = !m.done && !m.error;
   const tools = m.tools.length
     ? `<div class="mb-2 space-y-1">${m.tools.map((t) => `
         <details class="rounded-lg border border-slate-200 bg-slate-50 text-[12px]">
@@ -395,17 +416,16 @@ function messageHtml(m: Message, index: number): string {
           ${t.detail ? `<pre class="max-h-56 overflow-auto whitespace-pre-wrap break-all border-t border-slate-200 px-2.5 py-2 font-mono text-[11.5px] text-slate-600">${escapeHtml(t.detail)}</pre>` : ''}
         </details>`).join('')}</div>`
     : '';
-  const notes = m.notes.length ? `<p class="mt-2 whitespace-pre-wrap text-[11.5px] text-slate-400">${escapeHtml(m.notes.join('\n'))}</p>` : '';
+  const notes = m.notes.length ? `<details class="hm-run-details"><summary>Detail proses</summary><pre>${escapeHtml(m.notes.join('\n'))}</pre></details>` : '';
   const body = m.text.trim()
     ? `<div class="hm-md text-[14px] leading-relaxed text-slate-800 sm:text-[13.5px]">${renderMarkdown(m.text)}</div>`
-    : streaming
-      ? `<div class="flex items-center gap-2 text-[13px] text-slate-500">${spinner('size-3.5 text-brand-600')}Hermes sedang bekerja…</div>`
-      : '';
+    : '';
   const error = m.error ? `<div class="mt-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-[12.5px] text-red-700">${escapeHtml(m.error)}</div>` : '';
+  if (!tools && !body && !error && !notes) return `<div data-msg="${index}"></div>`;
   return `
-    <div class="flex gap-2 sm:gap-3" data-msg="${index}">
-      <span class="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white sm:size-7">${svg(ICON.zap, 'size-3 sm:size-3.5')}</span>
-      <div class="min-w-0 max-w-[calc(100%-2rem)] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-3.5 py-2.5 sm:max-w-[85%] sm:px-4 sm:py-3">${tools}${body}${error}${notes}</div>
+    <div class="hm-assistant flex gap-2 sm:gap-3" data-msg="${index}">
+      <span class="hm-assistant-avatar mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700 sm:size-7">${svg(ICON.zap, 'size-3 sm:size-3.5')}</span>
+      <div class="hm-assistant-content sm:pr-6">${tools}${body}${error}${notes}</div>
     </div>`;
 }
 
@@ -554,6 +574,11 @@ async function attempt(reply: Message, prompt: string, resume: string | undefine
     const lines = (partial + decoder.decode(value, { stream: true })).split('\n');
     partial = lines.pop() ?? '';
     lines.forEach(handleLine);
+    hermesChat.update({ steps: [
+      'Permintaan dikirim ke Hermes',
+      ...reply.tools.slice(-4).map(tool => tool.label),
+      ...(reply.text.trim() ? ['Menerima jawaban'] : []),
+    ] });
     renderLastBubble();
   }
   if (partial) handleLine(partial);
@@ -567,7 +592,7 @@ async function sendMessage(prompt: string) {
   convo.messages.push(user, reply);
   renderMessages();
   saveConversation();
-  setSending(true);
+  hermesChat.update({ busy: true, startedAt: reply.at, finishedAt: 0, outcome: 'done', steps: ['Permintaan dikirim ke Hermes'] });
 
   const controller = new AbortController();
   chatAbort = controller;
@@ -601,65 +626,17 @@ async function sendMessage(prompt: string) {
   } finally {
     reply.done = true;
     chatAbort = null;
-    setSending(false);
+    hermesChat.update({ busy: false, finishedAt: Date.now(), outcome: controller.signal.aborted ? 'stopped' : reply.error ? 'error' : 'done' });
     saveConversation();
     renderMessages();
   }
 }
 
-function setSending(sending: boolean) {
-  const btn = $<HTMLButtonElement>('hm-chat-send');
-  // HP: tombol ikon persegi; layar lebar: ikon + teks.
-  const size = 'size-11 shrink-0 px-0 sm:w-auto sm:px-4';
-  btn.className = `${sending ? 'btn-danger' : 'btn-primary'} ${size}`;
-  btn.setAttribute('aria-label', sending ? 'Hentikan' : 'Kirim');
-  btn.innerHTML = sending
-    ? `${svg(ICON.stop, 'size-3.5', 2.2)}<span class="hidden sm:inline">Hentikan</span>`
-    : `${svg(ICON.play, 'size-3.5', 2.2)}<span class="hidden sm:inline">Kirim</span>`;
-  $<HTMLTextAreaElement>('hm-chat-input').disabled = sending;
-}
-
-// Placeholder pendek di layar sempit supaya tidak terlipat dua baris.
-const narrow = window.matchMedia('(max-width: 639px)');
-const setPlaceholder = () => {
-  $<HTMLTextAreaElement>('hm-chat-input').placeholder = narrow.matches ? 'Perintahkan Hermes…' : 'Minta Hermes melakukan sesuatu di server ini…';
-};
-setPlaceholder();
-narrow.addEventListener('change', setPlaceholder);
-
-$('hm-chat-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  if (chatAbort) {
-    chatAbort.abort();
-    return;
-  }
-  const input = $<HTMLTextAreaElement>('hm-chat-input');
-  const prompt = input.value;
-  input.value = '';
-  autoGrow();
-  sendMessage(prompt);
+window.addEventListener('hermes:send', (e) => {
+  const text = (e as CustomEvent<{ text: string }>).detail.text;
+  if (typeof text === 'string') sendMessage(text);
 });
-
-// Layar sentuh: keyboard HP tidak punya Shift+Enter, jadi Enter = baris baru dan
-// kirim lewat tombol. Keyboard fisik: Enter kirim, Shift+Enter baris baru.
-const touchInput = window.matchMedia('(pointer: coarse)').matches;
-if (touchInput) $('hm-chat-input').setAttribute('enterkeyhint', 'enter');
-
-$('hm-chat-input').addEventListener('keydown', (e) => {
-  if (touchInput) return;
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault();
-    $<HTMLFormElement>('hm-chat-form').requestSubmit();
-  }
-});
-
-/** Kotak isian tumbuh mengikuti isi (sampai max-h), lalu bisa di-scroll. */
-function autoGrow() {
-  const input = $<HTMLTextAreaElement>('hm-chat-input');
-  input.style.height = 'auto';
-  input.style.height = `${Math.min(input.scrollHeight + 2, 160)}px`;
-}
-$('hm-chat-input').addEventListener('input', autoGrow);
+window.addEventListener('hermes:stop', () => chatAbort?.abort());
 
 // Pengaturan chat (maks. langkah, tanpa persetujuan, mode terminal): di HP dilipat.
 $('hm-chat-settings-toggle').addEventListener('click', () => {
@@ -683,6 +660,7 @@ $('hm-chat-new').addEventListener('click', async () => {
     if (!ok) return;
   }
   convo = { sessionId: '', messages: [] };
+  hermesChat.reset();
   saveConversation();
   renderMessages();
   $<HTMLTextAreaElement>('hm-chat-input').focus();
@@ -710,6 +688,7 @@ onView('hermes', () => {
     return;
   }
   loadedFor = host;
+  hermesChat.reset();
   convo = loadConversation();
   loadInfo();
 });

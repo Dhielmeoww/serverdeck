@@ -2,12 +2,19 @@
 import Icon from './Icon.astro';
 import GradientText from './reactbits/GradientText';
 import HermesEmpty from './reactbits/HermesEmpty';
+import HermesComposer from './reactbits/HermesComposer';
+import HermesProgress from './reactbits/HermesProgress';
 import { SUGGESTIONS } from '../lib/hermes-suggestions';
 ---
 
 <section data-view-panel="hermes" class="hidden">
+  <button id="hm-menu-toggle" type="button" class="hm-menu-toggle sm:hidden" aria-expanded="false" aria-controls="hm-navigation">
+    <Icon name="bot" size={18} /><span>Hermes <span aria-hidden="true">·</span> <span id="hm-menu-label">Chat</span></span>
+    <svg class="hm-menu-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+  </button>
+  <div id="hm-navigation">
   <!-- Judul dan tombol satu baris juga di HP: tombol jadi ikon saja supaya ruang chat lebih luas. -->
-  <div class="mb-3 flex items-start justify-between gap-3 sm:mb-5 sm:items-end">
+  <div class="hm-heading mb-3 flex items-start justify-between gap-3 sm:mb-5 sm:items-end">
     <div class="min-w-0">
       <h1 class="text-[18px] font-bold tracking-tight text-slate-900 sm:text-[20px]"><GradientText client:visible colors={['#123F34', '#268E6B', '#7CC8A5', '#268E6B', '#123F34']} animationSpeed={10}>Hermes Agent</GradientText></h1>
       <p id="hm-subtitle" class="mt-0.5 truncate text-[12.5px] text-slate-500 sm:text-[13px]">Agent AI dari Nous Research di server ini.</p>
@@ -22,10 +29,7 @@ import { SUGGESTIONS } from '../lib/hermes-suggestions';
     </div>
   </div>
 
-  <div id="hm-state"></div>
-
-  <div id="hm-main" class="hidden">
-    <!-- HP: tab bisa digeser ke samping; layar lebar: grid rata. -->
+    <!-- HP: tab di dalam menu toggle; layar lebar: grid rata. -->
     <div id="hm-tabs" class="segmented scroll-tabs mb-3 sm:mb-4 sm:w-[640px] sm:grid-cols-6">
       <button type="button" data-tab="chat" class="is-active">Chat</button>
       <button type="button" data-tab="overview">Ringkasan</button>
@@ -34,12 +38,17 @@ import { SUGGESTIONS } from '../lib/hermes-suggestions';
       <button type="button" data-tab="config">Konfigurasi</button>
       <button type="button" data-tab="jobs">Cron & sesi</button>
     </div>
+  </div>
+
+  <div id="hm-state"></div>
+
+  <div id="hm-main" class="hidden">
 
     <!-- ============ CHAT ============ -->
     <div data-panel="chat">
       <!-- Tinggi mengikuti layar (dvh: ikut menyesuaikan saat keyboard HP muncul). -->
-      <div class="card flex h-[calc(100dvh-13.5rem)] min-h-[340px] flex-col overflow-hidden sm:h-[calc(100dvh-15rem)] sm:min-h-[480px]">
-        <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 px-3 py-2 sm:px-4 sm:py-2.5">
+      <div class="hm-chat-card card flex h-[calc(100dvh-13.5rem)] min-h-[340px] flex-col overflow-hidden sm:h-[calc(100dvh-15rem)] sm:min-h-[480px]">
+        <div class="hm-chat-toolbar flex flex-wrap items-center gap-2 border-b border-slate-100 px-3 py-2 sm:px-4 sm:py-2.5">
           <button type="button" id="hm-chat-new" class="btn-secondary h-8 px-2.5 sm:px-3" title="Percakapan baru"><Icon name="plus" size={14} /><span class="sm:hidden">Baru</span><span class="hidden sm:inline">Percakapan baru</span></button>
           <span id="hm-chat-session" class="hidden min-w-0 truncate font-mono text-[11.5px] text-slate-400 md:inline"></span>
           <span id="hm-chat-yolo-badge" class="badge badge-red hidden">Tanpa persetujuan</span>
@@ -70,13 +79,11 @@ import { SUGGESTIONS } from '../lib/hermes-suggestions';
 
         <div id="hm-chat-log" class="hidden min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-slate-50/60 px-3 py-4 sm:px-4 sm:py-5"></div>
 
-        <form id="hm-chat-form" class="border-t border-slate-100 p-2.5 sm:p-3">
-          <div class="flex items-end gap-2">
-            <textarea id="hm-chat-input" rows="1" enterkeyhint="send" placeholder="Minta Hermes melakukan sesuatu…" class="field-input h-auto max-h-40 min-h-[44px] resize-none py-2.5 leading-relaxed sm:text-[13.5px]"></textarea>
-            <button type="submit" id="hm-chat-send" class="btn-primary size-11 shrink-0 px-0 sm:w-auto sm:px-4" aria-label="Kirim"><Icon name="play" size={15} /><span class="hidden sm:inline">Kirim</span></button>
-          </div>
+        <div id="hm-chat-form" class="shrink-0 border-t border-slate-100 p-2.5 sm:p-3">
+          <HermesProgress client:load />
+          <HermesComposer client:load />
           <p id="hm-chat-hint" class="mt-1.5 hidden text-[11.5px] text-slate-400 sm:block"></p>
-        </form>
+        </div>
       </div>
     </div>
 
@@ -215,6 +222,100 @@ import { SUGGESTIONS } from '../lib/hermes-suggestions';
 </section>
 
 <style is:global>
+  [data-view-panel="hermes"]:has(#hm-main.hidden) #hm-tabs { display: none; }
+  #hm-chat-form .hm-composer { width: 100%; }
+  .hm-composer .prompt-bar__field { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 28px; cursor: text; }
+  .hm-composer .prompt-bar__field:focus-within { border-color: #abdec8; box-shadow: 0 0 0 3px #eef8f380; }
+  .hm-composer .prompt-bar__input { min-height: 22px; box-sizing: content-box; padding: 10px 0 10px 8px; width: calc(100% - 8px); line-height: 22px; }
+  .hm-composer .prompt-bar__bar { align-self: end; }
+  .hm-composer .prompt-bar__send { width: 42px; height: 42px; border-radius: 50%; background: var(--color-brand-600); color: white; }
+  .hm-composer .prompt-bar__send:disabled { opacity: 0.35; cursor: default; }
+  .hm-assistant { width: 100%; }
+  .hm-assistant-content { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+  .hm-run-details { margin-top: 12px; color: #94a3b8; font-size: 11px; }
+  .hm-run-details summary { cursor: pointer; padding-block: 4px; }
+  .hm-run-details pre { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; }
+  .hm-composer button:focus-visible, .hm-progress button:focus-visible, #hm-menu-toggle:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 3px; }
+  .hm-progress { display: flex; align-items: flex-start; gap: 9px; padding: 6px 10px 10px; max-height: 25dvh; overflow: auto; color: var(--color-brand-800); }
+  .hm-progress > span { display: flex; flex-shrink: 0; align-items: center; height: 20px; }
+  .hm-progress .lattice-loader { display: flex; flex-shrink: 0; gap: 0; }
+  .hm-progress .lattice-loader__label { display: none; }
+  .hm-progress .thought-line { min-width: 0; flex: 1; }
+  .hm-progress .thought-line__head { flex-wrap: wrap; gap: 6px; min-height: 20px; line-height: 20px; white-space: normal; }
+  .hm-progress .thought-line__text:not([data-active]) { display: none; }
+  .hm-progress .thought-line__chevron { margin-left: 2px; }
+  .hm-progress .thought-line__steps { width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .hm-progress .thought-line__label { min-width: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .hm-progress *, .hm-composer * { animation: none !important; transition: none !important; }
+  }
+  @media (max-width: 639px) {
+    #app-container[data-view="hermes"] #app-header { gap: 8px; padding-inline: 12px; background: white; border-bottom-color: #f1f5f9; }
+    /* Breadcrumb yang invisible tetap mengambil tinggi dan menurunkan judul. */
+    #app-container[data-view="hermes"] #breadcrumb-container { display: none; }
+    #app-container[data-view="hermes"] #header-title { font-size: 15px; line-height: 20px; letter-spacing: -0.3px; }
+    #app-container[data-view="hermes"] #app-header > button { width: 40px; height: 40px; flex-shrink: 0; padding: 0; border: 0; border-radius: 12px; color: #64748b; }
+    #app-container[data-view="hermes"] #btn-toggle-terminal { background: #f8fafc; }
+    #app-container[data-view="hermes"] #app-header > button svg { width: 19px; height: 19px; }
+    #app-container[data-view="hermes"] #app-header > button:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 2px; }
+    #auth-view:has([data-view-panel="hermes"]:not(.hidden)) {
+      padding: 0 12px;
+    }
+    [data-view-panel="hermes"]:not(.hidden) {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      height: calc(100dvh - 4rem);
+      min-height: 0;
+    }
+    .hm-menu-toggle { display: inline-flex; align-items: center; align-self: flex-start; flex-shrink: 0; gap: 10px; min-height: 44px; margin: 10px 4px 6px; padding: 0 14px; border-radius: 24px; background: var(--color-brand-50); color: var(--color-brand-800); font-size: 14px; font-weight: 600; }
+    [data-view-panel="hermes"]:has(#hm-main:not(.hidden) [data-panel="chat"]:not(.hidden)) .hm-menu-toggle { max-width: calc(100% - 130px); }
+    .hm-menu-toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hm-menu-toggle > svg { flex-shrink: 0; }
+    .hm-menu-chevron { transition: transform 180ms ease; }
+    #hm-menu-toggle[aria-expanded="true"] .hm-menu-chevron { transform: rotate(180deg); }
+    #hm-navigation { display: none; position: absolute; top: 60px; left: 0; right: 0; z-index: 20; max-height: calc(100% - 72px); overflow-y: auto; padding: 12px; border: 1px solid #e2e8f0; border-radius: 18px; background: white; box-shadow: 0 16px 40px -16px #0f172a40; }
+    #hm-navigation[data-open] { display: block; }
+    .hm-heading {
+      align-items: center;
+      flex-shrink: 0;
+      margin: 0;
+      padding: 10px 4px;
+    }
+    .hm-heading h1 { font-size: 16px; }
+    #hm-subtitle { display: none; }
+    #hm-state { flex-shrink: 0; max-height: 35%; overflow-y: auto; }
+    [data-view-panel="hermes"]:has(#hm-main.hidden) #hm-state { max-height: none; flex: 1; min-height: 0; }
+    #hm-main:not(.hidden) { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+    #hm-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin: 8px 0 0; background: transparent; padding: 0; }
+    #hm-tabs button { height: 40px; padding-inline: 12px; }
+    #hm-tabs button.is-active { background: var(--color-brand-50); color: var(--color-brand-800); box-shadow: none; border-radius: 20px; }
+    #hm-main > [data-panel]:not(.hidden) { flex: 1; min-height: 0; overflow-y: auto; }
+    .hm-chat-card { height: 100%; min-height: 0; border: 0; border-radius: 0; }
+    .hm-chat-toolbar { position: absolute; top: 12px; right: 4px; flex-shrink: 0; border: 0; padding: 0; }
+    #hm-chat-new, #hm-chat-settings-toggle { height: 40px; border: 0; background: #f1f5f9; border-radius: 24px; }
+    #hm-chat-settings-toggle { width: 40px; }
+    #hm-chat-settings { position: absolute; top: 48px; right: 0; z-index: 21; width: min(360px, calc(100vw - 32px)); max-height: 45dvh; overflow-y: auto; padding: 16px; border: 1px solid #e2e8f0; border-radius: 16px; background: white; box-shadow: 0 12px 28px -12px #0f172a30; }
+    #hm-chat-yolo-badge:not(.hidden) { position: absolute; top: 44px; right: 0; z-index: 1; }
+    #hm-chat-empty, #hm-chat-log { background: transparent; padding: 20px 8px; }
+    #hm-chat-log { scrollbar-width: thin; scrollbar-color: #e2e8f0 transparent; }
+    #hm-chat-log > * + * { margin-top: 28px; }
+    .hm-assistant-avatar { display: none; }
+    .hm-assistant-content .hm-md { font-size: 15px; line-height: 1.75; }
+    .hm-assistant-content .hm-md pre { margin-block: 14px; border-radius: 12px; padding: 14px; }
+    #hm-chat-empty:not(.hidden) { display: flex; }
+    #hm-chat-empty > astro-island { display: flex; flex: 1; min-width: 0; }
+    .hm-empty-content { width: 100%; margin-block: auto; padding-block: 24px; }
+    .hm-empty-icon { width: 72px; height: 72px; margin-bottom: 24px; background: var(--color-brand-50); color: var(--color-brand-700); }
+    .hm-empty-icon svg { width: 32px; height: 32px; }
+    .hm-empty-title { font-size: 24px; letter-spacing: -0.8px; line-height: 1.25; }
+    .hm-empty-description { max-width: 290px; margin-top: 12px; font-size: 14px; line-height: 1.7; text-wrap: pretty; }
+    .hm-mobile-suggestions { margin-top: 24px; width: 100%; max-width: 320px; font-size: 13px; color: #64748b; }
+    .hm-mobile-suggestions summary { cursor: pointer; padding: 10px; }
+    .hm-mobile-suggestions button { display: block; width: 100%; margin-top: 8px; padding: 12px; border-radius: 12px; background: #f8fafc; text-align: left; }
+    #hm-chat-form { flex-shrink: 0; border: 0; padding: 8px 0 max(12px, env(safe-area-inset-bottom)); }
+    .hm-composer .prompt-bar__send { width: 44px; height: 44px; }
+  }
   .hm-pre {
     max-height: 60vh;
     min-height: 8rem;

@@ -239,7 +239,7 @@ const permRows = [
       </aside>
 
       <div class="lg:pl-64">
-        <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/85 px-4 backdrop-blur-md lg:px-8">
+        <header id="app-header" class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/85 px-4 backdrop-blur-md lg:px-8">
           <button type="button" id="btn-sidebar-toggle" class="icon-btn size-9 lg:hidden" aria-label="Buka menu">
             <Icon name="menu" size={20} />
           </button>
@@ -254,7 +254,7 @@ const permRows = [
             <span id="header-user-host">{userHost}</span>
           </span>
 
-          <button type="button" id="btn-toggle-terminal" class="btn-secondary">
+          <button type="button" id="btn-toggle-terminal" class="btn-secondary" aria-label="Buka atau tutup terminal">
             <Icon name="terminal" size={16} />
             <span class="hidden sm:inline">Terminal</span>
           </button>
